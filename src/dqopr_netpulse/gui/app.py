@@ -36,7 +36,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
-    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
@@ -627,7 +626,7 @@ class MainWindow(QMainWindow):
         }
 
     def _build_menu_bar(self) -> None:
-        file_menu = cast(QMenu, self.menuBar().addMenu("&File"))
+        file_menu = self.menuBar().addMenu("&File")
         file_menu.addAction(self._actions["new_test"])
         file_menu.addAction(self._actions["open_session"])
         file_menu.addSeparator()
@@ -636,7 +635,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction("E&xit", self.close)
 
-        monitor_menu = cast(QMenu, self.menuBar().addMenu("&Monitor"))
+        monitor_menu = self.menuBar().addMenu("&Monitor")
         monitor_menu.addAction(self._actions["start"])
         monitor_menu.addAction(self._actions["quick_test"])
         monitor_menu.addAction(self._actions["pause"])
@@ -644,10 +643,10 @@ class MainWindow(QMainWindow):
         monitor_menu.addSeparator()
         monitor_menu.addAction(self._actions["bad_now"])
 
-        tools_menu = cast(QMenu, self.menuBar().addMenu("&Tools"))
+        tools_menu = self.menuBar().addMenu("&Tools")
         tools_menu.addAction(self._actions["settings"])
 
-        help_menu = cast(QMenu, self.menuBar().addMenu("&Help"))
+        help_menu = self.menuBar().addMenu("&Help")
         help_menu.addAction(self._actions["help"])
         help_menu.addAction(self._actions["about"])
 
