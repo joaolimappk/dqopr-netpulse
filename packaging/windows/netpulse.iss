@@ -4,7 +4,7 @@
 #define AppCopyright "Copyright © 2026 DQOPR"
 #define AppVersion GetEnv("DQOPR_NETPULSE_VERSION")
 #if AppVersion == ""
-#define AppVersion "0.1.0"
+#define AppVersion "0.1.1"
 #endif
 #define EnvSourceDir GetEnv("DQOPR_NETPULSE_SOURCE_DIR")
 #if EnvSourceDir == ""
