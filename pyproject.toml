@@ -62,7 +62,7 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["dqopr_netpulse.gui.app"]
-disable_error_code = ["misc", "no-any-return"]
+disable_error_code = ["misc", "no-any-return", "untyped-decorator"]
 
 [tool.coverage.run]
 branch = true

@@ -2,7 +2,7 @@
 
 DQOPR NetPulse is an open-source Internet Quality Monitor and ISP Evidence Reporter for Windows users. Its goal is to collect local, durable, understandable evidence about intermittent internet problems such as latency spikes, jitter, packet loss, short outages, DNS failures, HTTPS failures, and speed degradation.
 
-The project is currently in early alpha. The repository contains a working command-line monitoring engine, typed data models, configuration defaults, SQLite storage layer, conservative incident classifier, CSV/ZIP exports, graph generation, self-contained HTML report generation, a PySide6 GUI shell, tests, documentation, and Windows release scaffolding.
+The project is currently in early alpha. The repository contains a working command-line monitoring engine, typed data models, configuration defaults, SQLite storage layer, conservative incident classifier, CSV/ZIP exports, graph generation, self-contained HTML report generation, a PySide6 GUI dashboard connected to the monitoring engine, tests, documentation, and Windows release scaffolding.
 
 ## What NetPulse Does
 
@@ -99,7 +99,7 @@ PYTHONPATH=src python -m dqopr_netpulse export-zip SESSION_ID exports/session.zi
 PYTHONPATH=src python -m dqopr_netpulse report SESSION_ID reports/isp-report.html
 ```
 
-The GUI entry point is available as `dqopr_netpulse.gui.app:main`. PySide6 is declared as a runtime dependency and should be validated on Windows before release packaging.
+The GUI entry point is available as `dqopr_netpulse.gui.app:main`. Start Monitoring launches the monitoring engine in a background Qt thread, streams live measurements into the dashboard, and persists them to the local SQLite database. PySide6 is declared as a runtime dependency and should be validated on Windows before release packaging.
 
 ## Examples
 

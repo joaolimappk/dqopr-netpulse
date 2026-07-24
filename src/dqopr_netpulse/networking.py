@@ -25,8 +25,11 @@ def detect_active_interface() -> NetworkInterfaceSnapshot:
     return _detect_linux_interface()
 
 
-def default_targets_with_gateway(public_targets: tuple[Target, ...]) -> tuple[Target, ...]:
-    snapshot = detect_active_interface()
+def default_targets_with_gateway(
+    public_targets: tuple[Target, ...],
+    snapshot: NetworkInterfaceSnapshot | None = None,
+) -> tuple[Target, ...]:
+    snapshot = snapshot or detect_active_interface()
     if snapshot.gateway_ip:
         gateway = Target(
             name="Local Gateway", host=snapshot.gateway_ip, enabled=True, is_gateway=True

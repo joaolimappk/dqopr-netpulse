@@ -33,12 +33,21 @@ private/
 /exports/
 /reports/
 /examples/generated/
+*.pcap
+*.pcapng
+*.cap
+*.har
+*.log
 
 # Build and release artifacts
 /build/
 /dist/
 /release_artifacts/
 /downloaded-artifacts/
+tmp/
+temp/
+*.tmp
+*.bak
 *.exe
 *.msi
 *.msix

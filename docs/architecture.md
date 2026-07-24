@@ -10,7 +10,9 @@ The current repository includes:
 - Domain models in `src/dqopr_netpulse/models.py`.
 - Configuration defaults and validation in `src/dqopr_netpulse/configuration.py`.
 - SQLite storage with schema migration 1 in `src/dqopr_netpulse/storage.py`.
-- Empty module directories reserved for exports, GUI, monitoring, and reports.
+- Monitoring engine callbacks for live state, activity, and measurement updates.
+- PySide6 GUI with a background worker thread connected to the monitoring engine.
+- CSV/ZIP exports, graph generation, and self-contained HTML report generation.
 
 ## Target Architecture
 
@@ -41,7 +43,7 @@ Session controller
 | `reports` | Self-contained HTML report generation and printable output. |
 | `graphs` | Latency, jitter, loss, speed, DNS, HTTPS, gateway comparison, Wi-Fi, and incident graphs. |
 | `exports` | Stable UTF-8 CSV and ZIP exports. |
-| `gui` | PySide6 startup wizard, monitoring dashboard, reports, settings, and help. |
+| `gui` | PySide6 startup wizard, live monitoring dashboard, background worker, reports, settings, and help. |
 | `platform_windows` | Windows network interface, Wi-Fi signal, sleep/resume, route, and signature-aware packaging helpers. |
 
 ## Data Flow
@@ -52,7 +54,7 @@ Session controller
 4. Measurements are written to SQLite immediately inside transactions.
 5. The incident engine groups related failures using rolling windows and supporting measurement IDs.
 6. Exports and reports read from SQLite instead of relying on in-memory state.
-7. The GUI reflects current status from the session controller and stored measurements.
+7. The GUI receives state, activity, and measurement callbacks from the background worker and reflects stored measurements as they arrive.
 
 ## Storage
 

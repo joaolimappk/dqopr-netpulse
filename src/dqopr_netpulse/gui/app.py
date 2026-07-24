@@ -7,12 +7,16 @@ time perform any application startup work.
 
 from __future__ import annotations
 
+import asyncio
 import sys
+import time
+from collections import deque
 from collections.abc import Sequence
 from dataclasses import replace
+from datetime import datetime
 from typing import cast
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -34,13 +38,15 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QSpinBox,
     QStatusBar,
     QStyle,
     QStyleFactory,
     QTableWidget,
-    QToolBar,
+    QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
     QWizard,
@@ -48,7 +54,9 @@ from PySide6.QtWidgets import (
 )
 
 from dqopr_netpulse.configuration import AppConfig, default_data_dir, validate_session_config
-from dqopr_netpulse.models import SessionConfig, Target
+from dqopr_netpulse.models import Measurement, ProbeMethod, SessionConfig, Target
+from dqopr_netpulse.monitoring.engine import MonitoringSession
+from dqopr_netpulse.storage import NetPulseStore
 
 APP_DISPLAY_NAME = "DQOPR NetPulse"
 
@@ -353,8 +361,75 @@ class AdvancedIntervalsPage(QWizardPage):
             )
 
 
+class MonitoringWorker(QObject):
+    """Runs the monitoring engine away from the GUI thread."""
+
+    activity = Signal(str)
+    state_changed = Signal(str)
+    measurement = Signal(object)
+    failed = Signal(str)
+    finished = Signal(str)
+
+    def __init__(self, app_config: AppConfig) -> None:
+        super().__init__()
+        self._app_config = app_config
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._session: MonitoringSession | None = None
+
+    @Slot()
+    def run(self) -> None:
+        store: NetPulseStore | None = None
+        loop = asyncio.new_event_loop()
+        self._loop = loop
+        asyncio.set_event_loop(loop)
+        try:
+            store = NetPulseStore(self._app_config.database_path)
+            self._session = MonitoringSession(
+                self._app_config,
+                store,
+                activity_callback=self.activity.emit,
+                measurement_callback=self.measurement.emit,
+                state_callback=self.state_changed.emit,
+            )
+            session_id = loop.run_until_complete(self._session.run())
+            self.finished.emit(session_id)
+        except Exception as exc:  # pragma: no cover - exercised by Windows/UI runtime
+            self.failed.emit(str(exc) or type(exc).__name__)
+        finally:
+            if store is not None:
+                store.close()
+            loop.close()
+            self._loop = None
+            self._session = None
+
+    def stop(self) -> None:
+        self._call_session("stop")
+
+    def pause(self) -> None:
+        self._call_session("pause")
+
+    def resume(self) -> None:
+        self._call_session("resume")
+
+    def mark_bad_now(self, note: str) -> None:
+        loop = self._loop
+        session = self._session
+        if loop is not None and session is not None:
+            loop.call_soon_threadsafe(self._add_marker, session, note)
+
+    def _call_session(self, method_name: str) -> None:
+        loop = self._loop
+        session = self._session
+        if loop is not None and session is not None:
+            loop.call_soon_threadsafe(getattr(session, method_name))
+
+    def _add_marker(self, session: MonitoringSession, note: str) -> None:
+        marker_id = session.add_manual_marker(note)
+        self.activity.emit(f"Manual quality marker saved (marker {marker_id}).")
+
+
 class MainWindow(QMainWindow):
-    """Main application window with placeholder actions for backend integration."""
+    """Main application window connected to the monitoring engine."""
 
     def __init__(
         self,
@@ -365,24 +440,56 @@ class MainWindow(QMainWindow):
         self.signals = BackendSignals(self)
         self._app_config = app_config or AppConfig(data_dir=default_data_dir())
         self._session_config = self._app_config.session
-        self._status = QLabel("Idle")
-        self._session_summary = QLabel()
-        self._session_summary.setWordWrap(True)
+        self._actions: dict[str, QAction] = {}
+        self._metric_labels: dict[str, QLabel] = {}
+        self._recent_measurements: deque[Measurement] = deque(maxlen=200)
+        self._worker_thread: QThread | None = None
+        self._worker: MonitoringWorker | None = None
+        self._state = "ready"
+        self._started_monotonic: float | None = None
+        self._paused_monotonic: float | None = None
+        self._last_measurement_monotonic: float | None = None
+        self._completed_cycles = 0
+        self._incident_count = 0
+
+        self._status_label = QLabel("Ready")
+        self._status_label.setObjectName("statusLabel")
+        self._elapsed_label = QLabel("Elapsed: 00:00:00")
+        self._remaining_label = QLabel("Mode: Ready")
+        self._last_measurement_label = QLabel("Last measurement: none yet")
+        self._recording_label = QLabel("Recording: idle")
+        self._current_operation = QLabel("Currently testing: idle")
+        self._current_operation.setWordWrap(True)
+        self._spinner = QProgressBar()
+        self._spinner.setRange(0, 0)
+        self._spinner.setTextVisible(False)
+        self._spinner.setMaximumHeight(8)
+        self._spinner.hide()
         self._activity_log = QPlainTextEdit()
         self._activity_log.setReadOnly(True)
-        self._metric_labels: dict[str, QLabel] = {}
-        self._actions: dict[str, QAction] = {}
+        self._activity_log.setMaximumBlockCount(100)
+        self._session_summary = QLabel()
+        self._session_summary.setWordWrap(True)
+        self._measurement_table = QTableWidget(0, 4)
+        self._measurement_table.setHorizontalHeaderLabels(("Time", "Test", "Target", "Result"))
+        self._measurement_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
 
         self.setWindowTitle(APP_DISPLAY_NAME)
-        self.setMinimumSize(1040, 680)
+        self.setMinimumSize(960, 680)
+        self._timer = QTimer(self)
+        self._timer.setInterval(1000)
+        self._timer.timeout.connect(self._tick)
+
         self._build_actions()
         self._build_menu_bar()
-        self._build_toolbar()
         self._build_central_widget()
         self._build_status_bar()
         self._connect_actions()
         self._refresh_session_summary()
-        self._append_log("Ready. Create a new test or start monitoring with the current settings.")
+        self._set_state("ready")
+        self._append_activity("Ready. Configure a test or start monitoring.")
 
     @property
     def session_config(self) -> SessionConfig:
@@ -391,8 +498,8 @@ class MainWindow(QMainWindow):
 
     def update_dashboard_status(self, status: str) -> None:
         """Update dashboard status text from an external controller."""
-        self._status.setText(status)
-        self._append_log(status)
+        self._set_state(status.lower().replace(" ", "_"))
+        self._append_activity(status)
 
     def set_metric(self, name: str, value: str) -> None:
         """Set a metric label by display name for backend-driven updates."""
@@ -424,8 +531,6 @@ class MainWindow(QMainWindow):
                 "Internet Feels Bad Now",
                 style.standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning),
             ),
-            "incidents": _action(self, "View Incidents"),
-            "graphs": _action(self, "View Graphs"),
             "report": _action(
                 self,
                 "Generate ISP Report",
@@ -475,10 +580,6 @@ class MainWindow(QMainWindow):
         monitor_menu.addSeparator()
         monitor_menu.addAction(self._actions["bad_now"])
 
-        view_menu = cast(QMenu, self.menuBar().addMenu("&View"))
-        view_menu.addAction(self._actions["incidents"])
-        view_menu.addAction(self._actions["graphs"])
-
         tools_menu = cast(QMenu, self.menuBar().addMenu("&Tools"))
         tools_menu.addAction(self._actions["settings"])
 
@@ -486,101 +587,113 @@ class MainWindow(QMainWindow):
         help_menu.addAction(self._actions["help"])
         help_menu.addAction(self._actions["about"])
 
-    def _build_toolbar(self) -> None:
-        toolbar = QToolBar("Monitoring")
-        toolbar.setMovable(False)
-        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        toolbar_actions = (
-            "new_test",
-            "start",
-            "pause",
-            "stop",
-            "bad_now",
-            "incidents",
-            "graphs",
-            "report",
-        )
-        for key in toolbar_actions:
-            toolbar.addAction(self._actions[key])
-            if key in {"new_test", "stop", "graphs"}:
-                toolbar.addSeparator()
-        self.addToolBar(toolbar)
-
     def _build_central_widget(self) -> None:
+        tabs = QTabWidget()
+        tabs.addTab(self._dashboard_tab(), "Dashboard")
+        tabs.addTab(self._details_tab(), "Details")
+        tabs.addTab(
+            _placeholder_table("Incidents", ("Time", "Severity", "Classification")), "Incidents"
+        )
+        tabs.addTab(self._reports_tab(), "Reports")
+        tabs.addTab(self._settings_tab(), "Settings")
+        self.setCentralWidget(tabs)
+
+    def _dashboard_tab(self) -> QWidget:
         root = QWidget()
         outer = QVBoxLayout(root)
-        outer.setContentsMargins(16, 16, 16, 16)
-        outer.setSpacing(12)
+        outer.setContentsMargins(18, 18, 18, 18)
+        outer.setSpacing(14)
 
         header = QHBoxLayout()
         title = QLabel(APP_DISPLAY_NAME)
-        title.setObjectName("windowTitle")
-        title.setStyleSheet("font-size: 22px; font-weight: 600;")
+        title.setStyleSheet("font-size: 24px; font-weight: 650;")
         header.addWidget(title)
         header.addStretch(1)
-        header.addWidget(QLabel("Status:"))
-        header.addWidget(self._status)
+        self._status_label.setStyleSheet("font-size: 20px; font-weight: 650;")
+        header.addWidget(self._status_label)
         outer.addLayout(header)
 
-        summary_group = QGroupBox("Current Session")
-        summary_layout = QVBoxLayout(summary_group)
-        summary_layout.addWidget(self._session_summary)
-        outer.addWidget(summary_group)
+        time_row = QHBoxLayout()
+        time_row.addWidget(self._elapsed_label)
+        time_row.addWidget(self._remaining_label)
+        time_row.addWidget(self._last_measurement_label)
+        time_row.addStretch(1)
+        time_row.addWidget(self._recording_label)
+        outer.addLayout(time_row)
 
         metric_grid = QGridLayout()
-        metric_grid.setSpacing(10)
+        metric_grid.setSpacing(12)
         metrics = (
-            ("Gateway", "Waiting"),
-            ("Public Targets", "Waiting"),
-            ("Latency", "-- ms"),
-            ("Packet Loss", "-- %"),
-            ("Jitter", "-- ms"),
-            ("DNS", "Waiting"),
-            ("HTTPS", "Waiting"),
-            ("Speed", "Not scheduled"),
+            ("Latency", "Starting test..."),
+            ("Packet Loss", "Starting test..."),
+            ("Jitter", "Starting test..."),
+            ("Connection to your router", "Waiting for first result"),
+            ("Internet connection", "Waiting for first result"),
         )
         for index, (name, value) in enumerate(metrics):
             box = _metric_box(name, value)
             self._metric_labels[name] = cast(QLabel, box.findChild(QLabel, "metricValue"))
-            metric_grid.addWidget(box, index // 4, index % 4)
+            metric_grid.addWidget(box, index // 3, index % 3)
         outer.addLayout(metric_grid)
 
-        quick_actions = QGridLayout()
-        quick_action_keys = (
-            "new_test",
-            "start",
-            "pause",
-            "stop",
-            "bad_now",
-            "incidents",
-            "graphs",
-            "report",
-            "export_csv",
-            "open_session",
-            "settings",
-            "help",
-            "about",
-        )
-        for index, key in enumerate(quick_action_keys):
+        operation_group = QGroupBox("Current operation")
+        operation_layout = QVBoxLayout(operation_group)
+        operation_layout.addWidget(self._current_operation)
+        operation_layout.addWidget(self._spinner)
+        outer.addWidget(operation_group)
+
+        controls = QHBoxLayout()
+        for key in ("start", "pause", "stop", "bad_now"):
             button = QPushButton(self._actions[key].text())
             button.setIcon(self._actions[key].icon())
             button.clicked.connect(self._actions[key].trigger)
-            quick_actions.addWidget(button, index // 4, index % 4)
-        outer.addLayout(quick_actions)
+            button.setMinimumHeight(34)
+            self._actions[key].changed.connect(
+                lambda action=self._actions[key], btn=button: self._sync_button(action, btn)
+            )
+            self._sync_button(self._actions[key], button)
+            controls.addWidget(button)
+        controls.addStretch(1)
+        outer.addLayout(controls)
 
-        tables = QHBoxLayout()
-        tables.addWidget(
-            _placeholder_table("Recent Incidents", ("Time", "Severity", "Classification"))
-        )
-        tables.addWidget(_placeholder_table("Recent Measurements", ("Time", "Target", "Result")))
-        outer.addLayout(tables, stretch=1)
-
-        log_group = QGroupBox("Activity")
+        log_group = QGroupBox("Recent activity")
         log_layout = QVBoxLayout(log_group)
         log_layout.addWidget(self._activity_log)
         outer.addWidget(log_group, stretch=1)
+        return root
 
-        self.setCentralWidget(root)
+    def _details_tab(self) -> QWidget:
+        root = QWidget()
+        layout = QVBoxLayout(root)
+        layout.addWidget(QLabel("Recent measurements and technical probe results"))
+        layout.addWidget(self._measurement_table)
+        return root
+
+    def _reports_tab(self) -> QWidget:
+        root = QWidget()
+        layout = QVBoxLayout(root)
+        layout.addWidget(
+            QLabel("Generate ISP evidence after or during a saved monitoring session.")
+        )
+        report = QPushButton(self._actions["report"].text())
+        report.clicked.connect(self._actions["report"].trigger)
+        export = QPushButton(self._actions["export_csv"].text())
+        export.clicked.connect(self._actions["export_csv"].trigger)
+        layout.addWidget(report)
+        layout.addWidget(export)
+        layout.addStretch(1)
+        return root
+
+    def _settings_tab(self) -> QWidget:
+        root = QWidget()
+        layout = QVBoxLayout(root)
+        layout.addWidget(QLabel("Current session settings"))
+        layout.addWidget(self._session_summary)
+        settings = QPushButton(self._actions["settings"].text())
+        settings.clicked.connect(self._actions["settings"].trigger)
+        layout.addWidget(settings)
+        layout.addStretch(1)
+        return root
 
     def _build_status_bar(self) -> None:
         status_bar = QStatusBar()
@@ -590,11 +703,9 @@ class MainWindow(QMainWindow):
     def _connect_actions(self) -> None:
         self._actions["new_test"].triggered.connect(self._new_test)
         self._actions["start"].triggered.connect(self._start_monitoring)
-        self._actions["pause"].triggered.connect(self._pause_monitoring)
+        self._actions["pause"].triggered.connect(self._pause_or_resume_monitoring)
         self._actions["stop"].triggered.connect(self._stop_monitoring)
         self._actions["bad_now"].triggered.connect(self._manual_marker)
-        self._actions["incidents"].triggered.connect(self._view_incidents)
-        self._actions["graphs"].triggered.connect(self._view_graphs)
         self._actions["report"].triggered.connect(self._generate_report)
         self._actions["export_csv"].triggered.connect(self._export_csv)
         self._actions["open_session"].triggered.connect(self._open_previous_session)
@@ -603,6 +714,11 @@ class MainWindow(QMainWindow):
         self._actions["about"].triggered.connect(self._about)
 
     def _new_test(self) -> None:
+        if self._is_active():
+            QMessageBox.information(
+                self, "Monitoring active", "Stop monitoring before changing tests."
+            )
+            return
         wizard = StartupWizard(self._session_config, self)
         if wizard.exec() == QDialog.DialogCode.Accepted:
             try:
@@ -612,44 +728,73 @@ class MainWindow(QMainWindow):
                 return
             self._refresh_session_summary()
             self.signals.new_test_requested.emit(self._session_config)
-            self._append_log("New test configured.")
+            self._append_activity("New test configured.")
 
     def _start_monitoring(self) -> None:
-        self._status.setText("Monitoring")
+        if self._is_active():
+            self._append_activity("Start ignored because a monitoring session is already active.")
+            return
+        self._recent_measurements.clear()
+        self._completed_cycles = 0
+        self._incident_count = 0
+        self._last_measurement_monotonic = None
+        self._started_monotonic = time.monotonic()
+        self._paused_monotonic = None
+        self._reset_metrics()
+        self._set_state("starting")
+        self._append_activity("Starting monitoring session...")
         self.signals.start_monitoring_requested.emit()
-        self._append_log("Start monitoring requested.")
 
-    def _pause_monitoring(self) -> None:
-        self._status.setText("Paused")
-        self.signals.pause_monitoring_requested.emit()
-        self._append_log("Pause requested.")
+        app_config = replace(self._app_config, session=self._session_config)
+        self._worker_thread = QThread(self)
+        self._worker = MonitoringWorker(app_config)
+        self._worker.moveToThread(self._worker_thread)
+        self._worker_thread.started.connect(self._worker.run)
+        self._worker.activity.connect(self._append_activity)
+        self._worker.state_changed.connect(self._handle_worker_state)
+        self._worker.measurement.connect(self._handle_measurement)
+        self._worker.failed.connect(self._worker_failed)
+        self._worker.finished.connect(self._worker_finished)
+        self._worker.failed.connect(self._worker_thread.quit)
+        self._worker.finished.connect(self._worker_thread.quit)
+        self._worker_thread.finished.connect(self._thread_finished)
+        self._worker_thread.start()
+        self._timer.start()
+
+    def _pause_or_resume_monitoring(self) -> None:
+        worker = self._worker
+        if worker is None:
+            return
+        if self._state == "paused":
+            worker.resume()
+            self.signals.pause_monitoring_requested.emit()
+        else:
+            worker.pause()
+            self.signals.pause_monitoring_requested.emit()
 
     def _stop_monitoring(self) -> None:
-        self._status.setText("Stopped")
+        worker = self._worker
+        if worker is None:
+            return
+        self._set_state("stopping")
         self.signals.stop_monitoring_requested.emit()
-        self._append_log("Stop requested.")
+        worker.stop()
 
     def _manual_marker(self) -> None:
         dialog = ManualMarkerDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             note = dialog.note()
+            if self._worker is not None:
+                self._worker.mark_bad_now(note)
             self.signals.manual_marker_requested.emit(note)
-            self._append_log("Manual quality marker recorded.")
-
-    def _view_incidents(self) -> None:
-        self.signals.view_incidents_requested.emit()
-        QMessageBox.information(self, "Incidents", "Incident view is ready for backend data.")
-
-    def _view_graphs(self) -> None:
-        self.signals.view_graphs_requested.emit()
-        QMessageBox.information(self, "Graphs", "Graph view is ready for backend data.")
+            self._append_activity("Internet feels bad marker requested.")
 
     def _generate_report(self) -> None:
         self.signals.generate_report_requested.emit()
         QMessageBox.information(
             self,
             "ISP Report",
-            "Report generation is ready for backend integration.",
+            "Report generation is available from saved sessions in this alpha build.",
         )
 
     def _export_csv(self) -> None:
@@ -661,7 +806,7 @@ class MainWindow(QMainWindow):
         )
         if path:
             self.signals.export_csv_requested.emit(path)
-            self._append_log(f"CSV export requested: {path}")
+            self._append_activity(f"CSV export requested: {path}")
 
     def _open_previous_session(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -672,9 +817,14 @@ class MainWindow(QMainWindow):
         )
         if path:
             self.signals.open_previous_session_requested.emit(path)
-            self._append_log(f"Open previous session requested: {path}")
+            self._append_activity(f"Open previous session requested: {path}")
 
     def _settings(self) -> None:
+        if self._is_active():
+            QMessageBox.information(
+                self, "Monitoring active", "Stop monitoring before changing settings."
+            )
+            return
         wizard = StartupWizard(self._session_config, self)
         if wizard.exec() == QDialog.DialogCode.Accepted:
             try:
@@ -684,14 +834,15 @@ class MainWindow(QMainWindow):
                 return
             self._refresh_session_summary()
             self.signals.settings_requested.emit(self._session_config)
-            self._append_log("Settings updated.")
+            self._append_activity("Settings updated.")
 
     def _help(self) -> None:
         self.signals.help_requested.emit()
         QMessageBox.information(
             self,
             "Help",
-            "Use New Test to configure evidence collection, then Start Monitoring.",
+            "Start Monitoring begins live tests. Watch Current operation and Recent activity "
+            "to confirm measurements are being recorded.",
         )
 
     def _about(self) -> None:
@@ -702,13 +853,178 @@ class MainWindow(QMainWindow):
             f"{APP_DISPLAY_NAME}\nInternet Quality Monitor and ISP Evidence Reporter",
         )
 
+    @Slot(str)
+    def _handle_worker_state(self, state: str) -> None:
+        self._set_state(state)
+
+    @Slot(object)
+    def _handle_measurement(self, raw: object) -> None:
+        measurement = cast(Measurement, raw)
+        self._last_measurement_monotonic = time.monotonic()
+        self._recent_measurements.append(measurement)
+        if measurement.method == ProbeMethod.ICMP:
+            self._completed_cycles = max(self._completed_cycles, measurement.sequence)
+        self._update_metrics()
+        self._add_measurement_row(measurement)
+        self._recording_label.setText("Recording: measurements saved")
+        if self._state == "starting":
+            self._set_state("monitoring")
+
+    @Slot(str)
+    def _worker_failed(self, message: str) -> None:
+        self._set_state("error")
+        self._append_activity(f"Monitoring failed: {message}")
+        QMessageBox.critical(self, "Monitoring failed", message)
+
+    @Slot(str)
+    def _worker_finished(self, session_id: str) -> None:
+        self._append_activity(f"Monitoring finished. Session ID: {session_id}")
+        if self._state != "error":
+            self._set_state("completed")
+
+    @Slot()
+    def _thread_finished(self) -> None:
+        if self._worker is not None:
+            self._worker.deleteLater()
+        if self._worker_thread is not None:
+            self._worker_thread.deleteLater()
+        self._worker = None
+        self._worker_thread = None
+        if self._state not in {"monitoring", "paused", "starting"}:
+            self._timer.stop()
+        self._set_controls()
+
+    def _tick(self) -> None:
+        self._update_timer_labels()
+        if self._state in {"monitoring", "starting"}:
+            if self._last_measurement_monotonic is None:
+                if self._started_monotonic and time.monotonic() - self._started_monotonic > 15:
+                    self._set_state("worker_not_responding")
+                    self._append_activity("No measurements received for 15 seconds.")
+            else:
+                age = time.monotonic() - self._last_measurement_monotonic
+                if age > max(15.0, self._session_config.latency_interval_seconds * 4):
+                    self._set_state("worker_not_responding")
+                    self._append_activity(f"No measurements received for {age:.0f} seconds.")
+
+    def _set_state(self, state: str) -> None:
+        self._state = state
+        labels = {
+            "ready": "Ready",
+            "starting": "Starting...",
+            "monitoring": "Monitoring active",
+            "paused": "PAUSED",
+            "stopping": "Stopping...",
+            "completed": "Completed",
+            "error": "Error",
+            "worker_not_responding": "Worker not responding",
+        }
+        self._status_label.setText(labels.get(state, state.replace("_", " ").title()))
+        self._spinner.setVisible(state in {"starting", "monitoring", "stopping"})
+        self._set_controls()
+        self._update_timer_labels()
+
+    def _set_controls(self) -> None:
+        active = self._is_active()
+        self._actions["start"].setEnabled(not active)
+        self._actions["new_test"].setEnabled(not active)
+        self._actions["settings"].setEnabled(not active)
+        self._actions["pause"].setEnabled(
+            self._state in {"monitoring", "paused", "worker_not_responding"}
+        )
+        self._actions["pause"].setText("Resume" if self._state == "paused" else "Pause")
+        self._actions["stop"].setEnabled(active)
+        self._actions["bad_now"].setEnabled(active)
+
+    def _is_active(self) -> bool:
+        return self._state in {
+            "starting",
+            "monitoring",
+            "paused",
+            "stopping",
+            "worker_not_responding",
+        }
+
+    def _update_timer_labels(self) -> None:
+        if self._started_monotonic is None:
+            self._elapsed_label.setText("Elapsed: 00:00:00")
+            self._remaining_label.setText("Mode: Ready")
+            return
+        elapsed = int(time.monotonic() - self._started_monotonic)
+        self._elapsed_label.setText(f"Elapsed: {_format_duration(elapsed)}")
+        if self._session_config.cycle_count is not None:
+            self._remaining_label.setText(
+                f"Cycle {self._completed_cycles} of {self._session_config.cycle_count}"
+            )
+        elif self._session_config.duration_seconds is not None:
+            remaining = max(0, self._session_config.duration_seconds - elapsed)
+            self._remaining_label.setText(f"Remaining: {_format_duration(remaining)}")
+        else:
+            self._remaining_label.setText("Mode: Continuous")
+        if self._last_measurement_monotonic is None:
+            self._last_measurement_label.setText("Last measurement: waiting for first result")
+        else:
+            age = max(0, int(time.monotonic() - self._last_measurement_monotonic))
+            self._last_measurement_label.setText(f"Last measurement: {age} seconds ago")
+
+    def _update_metrics(self) -> None:
+        recent = list(self._recent_measurements)
+        successes = [m for m in recent if m.success and m.rtt_ms is not None]
+        failures = [m for m in recent[-50:] if not m.success]
+        jitter_values = [m.jitter_ms for m in recent if m.jitter_ms is not None]
+        gateway_recent = [m for m in recent[-25:] if _is_gateway_measurement(m)]
+        internet_recent = [m for m in recent[-25:] if not _is_gateway_measurement(m)]
+        if successes:
+            self.set_metric("Latency", f"{successes[-1].rtt_ms:.0f} ms")
+        self.set_metric(
+            "Packet Loss", f"{(len(failures) / max(1, min(len(recent), 50)) * 100):.1f}%"
+        )
+        if jitter_values:
+            self.set_metric("Jitter", f"{jitter_values[-1]:.0f} ms")
+        self.set_metric("Connection to your router", _health_text(gateway_recent))
+        self.set_metric("Internet connection", _health_text(internet_recent))
+        if failures:
+            self._incident_count += 1
+
+    def _reset_metrics(self) -> None:
+        for key in ("Latency", "Packet Loss", "Jitter"):
+            self.set_metric(key, "Waiting for first result")
+        self.set_metric("Connection to your router", "Starting test...")
+        self.set_metric("Internet connection", "Starting test...")
+        self._measurement_table.setRowCount(0)
+        self._recording_label.setText("Recording: starting")
+        self._current_operation.setText("Currently testing: starting monitoring engine")
+
+    def _add_measurement_row(self, measurement: Measurement) -> None:
+        row = self._measurement_table.rowCount()
+        self._measurement_table.insertRow(row)
+        values = (
+            measurement.timestamp_utc.astimezone().strftime("%H:%M:%S"),
+            measurement.method.value.upper(),
+            measurement.target_name,
+            _measurement_result_text(measurement),
+        )
+        for column, value in enumerate(values):
+            self._measurement_table.setItem(row, column, QTableWidgetItem(value))
+        if row > 100:
+            self._measurement_table.removeRow(0)
+
     def _refresh_session_summary(self) -> None:
         self._session_summary.setText(_format_session_config(self._session_config))
 
-    def _append_log(self, message: str) -> None:
-        self._activity_log.appendPlainText(message)
+    @Slot(str)
+    def _append_activity(self, message: str) -> None:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self._current_operation.setText(f"Currently testing: {message}")
+        self._activity_log.appendPlainText(f"{timestamp} — {message}")
+
+    def _sync_button(self, action: QAction, button: QPushButton) -> None:
+        button.setText(action.text())
+        button.setEnabled(action.isEnabled())
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self._worker is not None:
+            self._worker.stop()
         self.signals.stop_monitoring_requested.emit()
         super().closeEvent(event)
 
@@ -813,6 +1129,46 @@ def _placeholder_table(title: str, columns: tuple[str, ...]) -> QGroupBox:
     table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
     layout.addWidget(table)
     return group
+
+
+def _format_duration(total_seconds: int) -> str:
+    hours, remainder = divmod(max(0, total_seconds), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02}:{minutes:02}:{seconds:02}"
+
+
+def _is_gateway_measurement(measurement: Measurement) -> bool:
+    return measurement.target_name == "Local Gateway"
+
+
+def _health_text(measurements: list[Measurement]) -> str:
+    if not measurements:
+        return "Waiting for first result"
+    recent = measurements[-10:]
+    if all(measurement.success for measurement in recent):
+        return "Healthy"
+    failed_count = len([measurement for measurement in recent if not measurement.success])
+    if failed_count == len(recent):
+        return "Offline"
+    return f"Degraded ({failed_count}/{len(recent)} failed)"
+
+
+def _measurement_result_text(measurement: Measurement) -> str:
+    if not measurement.success:
+        reason = measurement.error_type or measurement.error_message or "failed"
+        return f"Failed: {reason}"
+    if measurement.method == ProbeMethod.DNS and measurement.dns_duration_ms is not None:
+        return f"{measurement.dns_duration_ms:.0f} ms DNS"
+    if (
+        measurement.method == ProbeMethod.HTTPS
+        and measurement.https_response_duration_ms is not None
+    ):
+        return f"{measurement.https_response_duration_ms:.0f} ms HTTPS"
+    if measurement.method == ProbeMethod.TCP and measurement.tcp_connect_duration_ms is not None:
+        return f"{measurement.tcp_connect_duration_ms:.0f} ms TCP"
+    if measurement.rtt_ms is not None:
+        return f"{measurement.rtt_ms:.0f} ms"
+    return "Succeeded"
 
 
 def _format_session_config(config: SessionConfig) -> str:

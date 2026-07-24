@@ -25,6 +25,9 @@ from dqopr_netpulse.storage import NetPulseStore
 
 LOGGER = logging.getLogger(__name__)
 InterfaceProvider = Callable[[], NetworkInterfaceSnapshot]
+ActivityCallback = Callable[[str], None]
+MeasurementCallback = Callable[[Measurement], None]
+StateCallback = Callable[[str], None]
 
 
 class MonitoringSession:
@@ -37,6 +40,9 @@ class MonitoringSession:
         probe_runner: ProbeRunner | None = None,
         interface_provider: InterfaceProvider = detect_active_interface,
         session_id: str | None = None,
+        activity_callback: ActivityCallback | None = None,
+        measurement_callback: MeasurementCallback | None = None,
+        state_callback: StateCallback | None = None,
     ) -> None:
         validate_session_config(app_config.session)
         self.app_config = app_config
@@ -44,6 +50,9 @@ class MonitoringSession:
         self.probe_runner = probe_runner or ProbeRunner()
         self.interface_provider = interface_provider
         self.session_id = session_id or str(uuid4())
+        self.activity_callback = activity_callback
+        self.measurement_callback = measurement_callback
+        self.state_callback = state_callback
         self._stop_event = asyncio.Event()
         self._pause_event = asyncio.Event()
         self._pause_event.set()
@@ -54,10 +63,20 @@ class MonitoringSession:
         """Run the monitoring session until duration, cycle count, or stop."""
         config = self.app_config.session
         config_json = json.dumps(asdict(config), default=str, sort_keys=True)
+        self._state("starting")
+        self._activity("Starting monitoring engine.")
         self.store.create_session(self.session_id, config_json)
+        self._activity("Session created. Measurements will be saved continuously.")
         started_monotonic = time.monotonic()
         cycles = 0
-        targets = default_targets_with_gateway(config.targets)
+        self._activity("Detecting active network adapter and default gateway.")
+        interface = self.interface_provider()
+        targets = default_targets_with_gateway(config.targets, interface)
+        if targets and targets[0].is_gateway:
+            self._activity(f"Default gateway detected: {targets[0].host}.")
+        enabled_count = len([target for target in targets if target.enabled])
+        self._activity(f"Initialized {enabled_count} monitoring target(s).")
+        self._state("monitoring")
         LOGGER.info("Starting monitoring session %s with %s targets", self.session_id, len(targets))
         try:
             while not self._stop_event.is_set():
@@ -71,23 +90,36 @@ class MonitoringSession:
                     break
                 await self._run_cycle(targets)
                 cycles += 1
+                self._activity(
+                    "Waiting "
+                    f"{config.latency_interval_seconds:g} seconds before the next probe cycle."
+                )
                 await asyncio.sleep(config.latency_interval_seconds)
         except Exception:
             self.store.finish_session(self.session_id, "failed")
+            self._state("error")
+            self._activity("Monitoring stopped unexpectedly because the worker failed.")
             LOGGER.exception("Monitoring session failed")
             raise
         else:
             self.store.finish_session(self.session_id, "completed")
+            self._state("completed")
+            self._activity("Monitoring session completed.")
         return self.session_id
 
     def stop(self) -> None:
+        self._activity("Stopping monitoring session.")
         self._stop_event.set()
         self._pause_event.set()
 
     def pause(self) -> None:
+        self._state("paused")
+        self._activity("Monitoring paused. No new probe cycles will start until resumed.")
         self._pause_event.clear()
 
     def resume(self) -> None:
+        self._state("monitoring")
+        self._activity("Monitoring resumed.")
         self._pause_event.set()
 
     def add_manual_marker(self, note: str | None = None) -> int:
@@ -132,37 +164,67 @@ class MonitoringSession:
         self._sequence += 1
         interface = self.interface_provider()
         enabled_targets = [target for target in targets if target.enabled]
+        if interface.name:
+            self._activity(f"Using active adapter: {interface.name}.")
         tasks: list[Awaitable[Measurement]] = [
-            self.probe_runner.icmp(self.session_id, target, self._sequence, interface)
-            for target in enabled_targets
+            self._probe_icmp(target, interface) for target in enabled_targets
         ]
         tasks.extend(
-            self.probe_runner.tcp(self.session_id, target, self._sequence, interface)
+            self._probe_tcp(target, interface)
             for target in enabled_targets
             if not target.is_gateway
         )
+        public_targets = [target for target in enabled_targets if not target.is_gateway]
         if enabled_targets:
-            tasks.append(
-                self.probe_runner.dns(
-                    self.session_id, enabled_targets[0], self._sequence, interface
-                )
-            )
-            tasks.append(
-                self.probe_runner.https(
-                    self.session_id, enabled_targets[0], self._sequence, interface
-                )
-            )
+            dns_https_target = public_targets[0] if public_targets else enabled_targets[0]
+            tasks.append(self._probe_dns(dns_https_target, interface))
+            tasks.append(self._probe_https(dns_https_target, interface))
         measurements = await asyncio.gather(*tasks)
         for measurement in measurements:
             self.store.add_measurement(measurement)
             self._recent_measurements.append(measurement)
+            self._measurement(measurement)
+            self._activity(_measurement_activity(measurement))
         self._recent_measurements = self._recent_measurements[-500:]
+        self._activity("Measurements saved.")
         for incident in classify_measurements(
             list(measurements),
             session_id=self.session_id,
             thresholds=self.app_config.thresholds,
         ):
             self.store.add_incident(incident)
+            self._activity(f"Incident detected: {incident.incident_type.value}.")
+
+    async def _probe_icmp(self, target: Target, interface: NetworkInterfaceSnapshot) -> Measurement:
+        label = "local gateway" if target.is_gateway else f"{target.name} {target.host}"
+        self._activity(f"Pinging {label}.")
+        return await self.probe_runner.icmp(self.session_id, target, self._sequence, interface)
+
+    async def _probe_tcp(self, target: Target, interface: NetworkInterfaceSnapshot) -> Measurement:
+        self._activity(f"Checking website port {target.tcp_port} on {target.name}.")
+        return await self.probe_runner.tcp(self.session_id, target, self._sequence, interface)
+
+    async def _probe_dns(self, target: Target, interface: NetworkInterfaceSnapshot) -> Measurement:
+        self._activity("Resolving example.com through configured DNS.")
+        return await self.probe_runner.dns(self.session_id, target, self._sequence, interface)
+
+    async def _probe_https(
+        self, target: Target, interface: NetworkInterfaceSnapshot
+    ) -> Measurement:
+        self._activity(f"Testing HTTPS connectivity to {target.name}.")
+        return await self.probe_runner.https(self.session_id, target, self._sequence, interface)
+
+    def _activity(self, message: str) -> None:
+        if self.activity_callback is not None:
+            self.activity_callback(message)
+
+    def _measurement(self, measurement: Measurement) -> None:
+        if self.measurement_callback is not None:
+            self.measurement_callback(measurement)
+
+    def _state(self, state: str) -> None:
+        if self.state_callback is not None:
+            self.state_callback(state)
 
 
 def _method_status(measurements: list[Measurement], method: ProbeMethod) -> str:
@@ -185,3 +247,23 @@ def _status_label(measurements: list[Measurement]) -> str:
     if any(m.rtt_ms is not None and m.rtt_ms >= 150 for m in recent):
         return "High latency"
     return "Healthy"
+
+
+def _measurement_activity(measurement: Measurement) -> str:
+    target = measurement.target_name
+    if measurement.success:
+        if measurement.method == ProbeMethod.DNS and measurement.dns_duration_ms is not None:
+            return f"DNS resolution completed in {measurement.dns_duration_ms:.0f} ms."
+        if (
+            measurement.method == ProbeMethod.HTTPS
+            and measurement.https_response_duration_ms is not None
+        ):
+            return (
+                f"Website connection test completed in "
+                f"{measurement.https_response_duration_ms:.0f} ms."
+            )
+        if measurement.rtt_ms is not None:
+            return f"{target} responded in {measurement.rtt_ms:.0f} ms."
+        return f"{target} responded."
+    reason = measurement.error_type or "no response"
+    return f"{target} did not respond ({reason})."
