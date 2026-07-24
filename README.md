@@ -7,6 +7,7 @@ The project is currently in early alpha. The repository contains a working comma
 ## What NetPulse Does
 
 - Monitors local gateway health and multiple independent public internet targets.
+- Runs a one-time Quick Test snapshot with latency, packet-loss, DNS, TCP, HTTPS, and optional speed-test evidence.
 - Records measurements incrementally to SQLite so long-running tests are not kept only in memory.
 - Uses conservative incident classifications and confidence labels.
 - Generates CSV exports, graph images, ZIP export bundles, and self-contained HTML ISP reports.
@@ -23,7 +24,7 @@ NetPulse must never disable, bypass, suppress, or interfere with Windows Defende
 1. Enter contracted download and upload speeds, or choose "I don't know".
 2. Choose a test duration such as 10 minutes, 1 hour, 6 hours, 24 hours, continuous monitoring, a custom duration, or a custom cycle count.
 3. Accept safe default probe intervals or adjust advanced settings.
-4. Start monitoring and leave the application running.
+4. Run a Quick Test for a fast snapshot, or start monitoring and leave the application running.
 5. Press "Internet feels bad now" during noticeable problems.
 6. Generate an ISP-oriented HTML report, graphs, and CSV exports.
 
@@ -99,7 +100,7 @@ PYTHONPATH=src python -m dqopr_netpulse export-zip SESSION_ID exports/session.zi
 PYTHONPATH=src python -m dqopr_netpulse report SESSION_ID reports/isp-report.html
 ```
 
-The GUI entry point is available as `dqopr_netpulse.gui.app:main`. Start Monitoring launches the monitoring engine in a background Qt thread, streams live measurements into the dashboard, and persists them to the local SQLite database. PySide6 is declared as a runtime dependency and should be validated on Windows before release packaging.
+The GUI entry point is available as `dqopr_netpulse.gui.app:main`. Run Quick Test performs one complete diagnostic snapshot and then stops automatically. Start Monitoring launches the monitoring engine in a background Qt thread, streams live measurements into the dashboard, and persists them to the local SQLite database. PySide6 is declared as a runtime dependency and should be validated on Windows before release packaging.
 
 ## Examples
 

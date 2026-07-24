@@ -11,6 +11,7 @@ The current repository includes:
 - Configuration defaults and validation in `src/dqopr_netpulse/configuration.py`.
 - SQLite storage with schema migration 1 in `src/dqopr_netpulse/storage.py`.
 - Monitoring engine callbacks for live state, activity, and measurement updates.
+- One-cycle quick-test orchestration that reuses the monitoring engine, storage, speed-test wrapper, exports, and reports.
 - PySide6 GUI with a background worker thread connected to the monitoring engine.
 - CSV/ZIP exports, graph generation, and self-contained HTML report generation.
 
@@ -38,6 +39,7 @@ Session controller
 | `models` | Typed records shared by probes, storage, reports, and GUI. |
 | `storage` | SQLite connection management, schema migrations, transactions, and query helpers. |
 | `monitoring` | Scheduling, session lifecycle, probe orchestration, pause/resume/stop semantics. |
+| `quick_test` | One-cycle quick-test orchestration, progress callbacks, speed-test capture, and summary generation. |
 | `probes` | ICMP, TCP, DNS, HTTPS, route, and speed-test checks through mockable interfaces. |
 | `diagnostics` | Incident grouping, fault-domain classification, severity, confidence, and explanations. |
 | `reports` | Self-contained HTML report generation and printable output. |
@@ -48,7 +50,7 @@ Session controller
 
 ## Data Flow
 
-1. The user creates a monitoring session through the GUI or CLI.
+1. The user runs a quick test or creates a monitoring session through the GUI or CLI.
 2. Configuration is validated and serialized into the session record.
 3. Probes run on configured intervals using monotonic clocks for timing.
 4. Measurements are written to SQLite immediately inside transactions.

@@ -14,6 +14,7 @@ from collections import deque
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime
+from pathlib import Path
 from typing import cast
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
@@ -54,8 +55,11 @@ from PySide6.QtWidgets import (
 )
 
 from dqopr_netpulse.configuration import AppConfig, default_data_dir, validate_session_config
+from dqopr_netpulse.exports.csv_export import export_session_csv
 from dqopr_netpulse.models import Measurement, ProbeMethod, SessionConfig, Target
 from dqopr_netpulse.monitoring.engine import MonitoringSession
+from dqopr_netpulse.quick_test import QuickTestRunner, QuickTestSummary
+from dqopr_netpulse.reports.html_report import generate_html_report
 from dqopr_netpulse.storage import NetPulseStore
 
 APP_DISPLAY_NAME = "DQOPR NetPulse"
@@ -428,6 +432,54 @@ class MonitoringWorker(QObject):
         self.activity.emit(f"Manual quality marker saved (marker {marker_id}).")
 
 
+class QuickTestWorker(QObject):
+    """Runs one complete quick test away from the GUI thread."""
+
+    activity = Signal(str)
+    progress = Signal(int, int, str)
+    measurement = Signal(object)
+    failed = Signal(str)
+    finished = Signal(object)
+
+    def __init__(self, app_config: AppConfig) -> None:
+        super().__init__()
+        self._app_config = app_config
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._runner: QuickTestRunner | None = None
+
+    @Slot()
+    def run(self) -> None:
+        store: NetPulseStore | None = None
+        loop = asyncio.new_event_loop()
+        self._loop = loop
+        asyncio.set_event_loop(loop)
+        try:
+            store = NetPulseStore(self._app_config.database_path)
+            self._runner = QuickTestRunner(
+                self._app_config,
+                store,
+                activity_callback=self.activity.emit,
+                progress_callback=self.progress.emit,
+                measurement_callback=self.measurement.emit,
+            )
+            summary = loop.run_until_complete(self._runner.run())
+            self.finished.emit(summary)
+        except Exception as exc:  # pragma: no cover - exercised by Windows/UI runtime
+            self.failed.emit(str(exc) or type(exc).__name__)
+        finally:
+            if store is not None:
+                store.close()
+            loop.close()
+            self._loop = None
+            self._runner = None
+
+    def cancel(self) -> None:
+        loop = self._loop
+        runner = self._runner
+        if loop is not None and runner is not None:
+            loop.call_soon_threadsafe(runner.cancel)
+
+
 class MainWindow(QMainWindow):
     """Main application window connected to the monitoring engine."""
 
@@ -445,6 +497,10 @@ class MainWindow(QMainWindow):
         self._recent_measurements: deque[Measurement] = deque(maxlen=200)
         self._worker_thread: QThread | None = None
         self._worker: MonitoringWorker | None = None
+        self._quick_worker_thread: QThread | None = None
+        self._quick_worker: QuickTestWorker | None = None
+        self._last_session_id: str | None = None
+        self._last_quick_summary: QuickTestSummary | None = None
         self._state = "ready"
         self._started_monotonic: float | None = None
         self._paused_monotonic: float | None = None
@@ -465,6 +521,8 @@ class MainWindow(QMainWindow):
         self._spinner.setTextVisible(False)
         self._spinner.setMaximumHeight(8)
         self._spinner.hide()
+        self._quick_summary_label = QLabel("Quick test results will appear here.")
+        self._quick_summary_label.setWordWrap(True)
         self._activity_log = QPlainTextEdit()
         self._activity_log.setReadOnly(True)
         self._activity_log.setMaximumBlockCount(100)
@@ -519,6 +577,11 @@ class MainWindow(QMainWindow):
                 self,
                 "Start Monitoring",
                 style.standardIcon(QStyle.StandardPixmap.SP_MediaPlay),
+            ),
+            "quick_test": _action(
+                self,
+                "Run Quick Test",
+                style.standardIcon(QStyle.StandardPixmap.SP_ComputerIcon),
             ),
             "pause": _action(
                 self,
@@ -575,6 +638,7 @@ class MainWindow(QMainWindow):
 
         monitor_menu = cast(QMenu, self.menuBar().addMenu("&Monitor"))
         monitor_menu.addAction(self._actions["start"])
+        monitor_menu.addAction(self._actions["quick_test"])
         monitor_menu.addAction(self._actions["pause"])
         monitor_menu.addAction(self._actions["stop"])
         monitor_menu.addSeparator()
@@ -642,6 +706,19 @@ class MainWindow(QMainWindow):
         operation_layout.addWidget(self._spinner)
         outer.addWidget(operation_group)
 
+        quick_button = QPushButton(self._actions["quick_test"].text())
+        quick_button.setIcon(self._actions["quick_test"].icon())
+        quick_button.clicked.connect(self._actions["quick_test"].trigger)
+        quick_button.setMinimumHeight(44)
+        quick_button.setStyleSheet("font-size: 17px; font-weight: 650;")
+        self._actions["quick_test"].changed.connect(
+            lambda action=self._actions["quick_test"], btn=quick_button: self._sync_button(
+                action, btn
+            )
+        )
+        self._sync_button(self._actions["quick_test"], quick_button)
+        outer.addWidget(quick_button)
+
         controls = QHBoxLayout()
         for key in ("start", "pause", "stop", "bad_now"):
             button = QPushButton(self._actions[key].text())
@@ -658,6 +735,7 @@ class MainWindow(QMainWindow):
 
         log_group = QGroupBox("Recent activity")
         log_layout = QVBoxLayout(log_group)
+        log_layout.addWidget(self._quick_summary_label)
         log_layout.addWidget(self._activity_log)
         outer.addWidget(log_group, stretch=1)
         return root
@@ -703,6 +781,7 @@ class MainWindow(QMainWindow):
     def _connect_actions(self) -> None:
         self._actions["new_test"].triggered.connect(self._new_test)
         self._actions["start"].triggered.connect(self._start_monitoring)
+        self._actions["quick_test"].triggered.connect(self._run_quick_test)
         self._actions["pause"].triggered.connect(self._pause_or_resume_monitoring)
         self._actions["stop"].triggered.connect(self._stop_monitoring)
         self._actions["bad_now"].triggered.connect(self._manual_marker)
@@ -742,6 +821,7 @@ class MainWindow(QMainWindow):
         self._paused_monotonic = None
         self._reset_metrics()
         self._set_state("starting")
+        self._spinner.setRange(0, 0)
         self._append_activity("Starting monitoring session...")
         self.signals.start_monitoring_requested.emit()
 
@@ -773,6 +853,10 @@ class MainWindow(QMainWindow):
             self.signals.pause_monitoring_requested.emit()
 
     def _stop_monitoring(self) -> None:
+        if self._quick_worker is not None:
+            self._set_state("stopping")
+            self._quick_worker.cancel()
+            return
         worker = self._worker
         if worker is None:
             return
@@ -791,22 +875,49 @@ class MainWindow(QMainWindow):
 
     def _generate_report(self) -> None:
         self.signals.generate_report_requested.emit()
-        QMessageBox.information(
-            self,
-            "ISP Report",
-            "Report generation is available from saved sessions in this alpha build.",
-        )
-
-    def _export_csv(self) -> None:
+        session_id = self._last_session_id
+        if session_id is None:
+            QMessageBox.information(self, "ISP Report", "Run a test before generating a report.")
+            return
         path, _ = QFileDialog.getSaveFileName(
             self,
+            "Generate ISP Report",
+            f"netpulse-report-{session_id[:8]}.html",
+            "HTML files (*.html)",
+        )
+        if path:
+            store = NetPulseStore(self._app_config.database_path)
+            try:
+                generate_html_report(
+                    store,
+                    session_id,
+                    Path(path),
+                    contracted_download_mbps=self._session_config.contracted_download_mbps,
+                    contracted_upload_mbps=self._session_config.contracted_upload_mbps,
+                    private_mode=self._app_config.private_report_mode,
+                )
+            finally:
+                store.close()
+            self._append_activity(f"Report generated: {path}")
+
+    def _export_csv(self) -> None:
+        session_id = self._last_session_id
+        if session_id is None:
+            QMessageBox.information(self, "Export CSV", "Run a test before exporting results.")
+            return
+        path = QFileDialog.getExistingDirectory(
+            self,
             "Export CSV",
-            "netpulse-session.csv",
-            "CSV files (*.csv)",
+            str(self._app_config.data_dir),
         )
         if path:
             self.signals.export_csv_requested.emit(path)
-            self._append_activity(f"CSV export requested: {path}")
+            store = NetPulseStore(self._app_config.database_path)
+            try:
+                export_session_csv(store, session_id, Path(path))
+            finally:
+                store.close()
+            self._append_activity(f"CSV export completed: {path}")
 
     def _open_previous_session(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -842,7 +953,8 @@ class MainWindow(QMainWindow):
             self,
             "Help",
             "Start Monitoring begins live tests. Watch Current operation and Recent activity "
-            "to confirm measurements are being recorded.",
+            "to confirm measurements are being recorded. Run Quick Test performs one snapshot "
+            "cycle and then stops automatically.",
         )
 
     def _about(self) -> None:
@@ -878,6 +990,7 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _worker_finished(self, session_id: str) -> None:
+        self._last_session_id = session_id
         self._append_activity(f"Monitoring finished. Session ID: {session_id}")
         if self._state != "error":
             self._set_state("completed")
@@ -890,6 +1003,116 @@ class MainWindow(QMainWindow):
             self._worker_thread.deleteLater()
         self._worker = None
         self._worker_thread = None
+        if self._state not in {"monitoring", "paused", "starting"}:
+            self._timer.stop()
+        self._set_controls()
+
+    def _run_quick_test(self) -> None:
+        if self._is_active():
+            self._append_activity("Quick test ignored because another test is already active.")
+            return
+        choice = self._confirm_quick_test()
+        if choice == "one_hour":
+            self._session_config = replace(
+                self._session_config, duration_seconds=3600, cycle_count=None
+            )
+            self._refresh_session_summary()
+            self._start_monitoring()
+            return
+        if choice != "quick":
+            return
+
+        self._recent_measurements.clear()
+        self._completed_cycles = 0
+        self._incident_count = 0
+        self._last_measurement_monotonic = None
+        self._started_monotonic = time.monotonic()
+        self._paused_monotonic = None
+        self._last_session_id = None
+        self._last_quick_summary = None
+        self._reset_metrics()
+        self._set_state("quick_running")
+        self._spinner.setRange(0, 10)
+        self._spinner.setValue(0)
+        self._spinner.setTextVisible(True)
+        self._recording_label.setText("Recording: quick test")
+        self._quick_summary_label.setText("Quick test running. Results are a snapshot.")
+        self._append_activity("Quick test started.")
+
+        app_config = replace(self._app_config, session=self._session_config)
+        self._quick_worker_thread = QThread(self)
+        self._quick_worker = QuickTestWorker(app_config)
+        self._quick_worker.moveToThread(self._quick_worker_thread)
+        self._quick_worker_thread.started.connect(self._quick_worker.run)
+        self._quick_worker.activity.connect(self._append_activity)
+        self._quick_worker.progress.connect(self._handle_quick_progress)
+        self._quick_worker.measurement.connect(self._handle_measurement)
+        self._quick_worker.failed.connect(self._quick_failed)
+        self._quick_worker.finished.connect(self._quick_finished)
+        self._quick_worker.failed.connect(self._quick_worker_thread.quit)
+        self._quick_worker.finished.connect(self._quick_worker_thread.quit)
+        self._quick_worker_thread.finished.connect(self._quick_thread_finished)
+        self._quick_worker_thread.start()
+        self._timer.start()
+
+    def _confirm_quick_test(self) -> str:
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Quick Test")
+        dialog.setIcon(QMessageBox.Icon.Information)
+        dialog.setText("Quick Test")
+        dialog.setInformativeText(
+            "This test performs one complete connection check, including latency, packet "
+            "loss, DNS, website connectivity, download speed, and upload speed.\n\n"
+            "It provides a useful snapshot of your connection, but a single test may miss "
+            "intermittent problems.\n\n"
+            "For stronger evidence when contacting your ISP, we recommend running "
+            "continuous monitoring for at least 1 hour.\n\n"
+            "Speed testing will temporarily use a significant portion of your internet "
+            "connection."
+        )
+        quick = dialog.addButton("Run Quick Test", QMessageBox.ButtonRole.AcceptRole)
+        one_hour = dialog.addButton("Start 1-Hour Test Instead", QMessageBox.ButtonRole.ActionRole)
+        dialog.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        dialog.exec()
+        clicked = dialog.clickedButton()
+        if clicked == quick:
+            return "quick"
+        if clicked == one_hour:
+            return "one_hour"
+        return "cancel"
+
+    @Slot(int, int, str)
+    def _handle_quick_progress(self, step: int, total: int, label: str) -> None:
+        self._spinner.setRange(0, total)
+        self._spinner.setValue(step)
+        self._remaining_label.setText(f"Step {step} of {total}")
+        self._current_operation.setText(f"Step {step} of {total} - {label}")
+
+    @Slot(object)
+    def _quick_finished(self, raw: object) -> None:
+        summary = cast(QuickTestSummary, raw)
+        self._last_quick_summary = summary
+        self._last_session_id = summary.session_id
+        self._quick_summary_label.setText(_format_quick_summary(summary))
+        self._recording_label.setText("Recording: quick test saved")
+        self._append_activity(f"Quick test finished. Session ID: {summary.session_id}")
+        if self._state != "error":
+            self._set_state("quick_completed")
+
+    @Slot(str)
+    def _quick_failed(self, message: str) -> None:
+        self._set_state("error")
+        self._append_activity(f"Quick test failed: {message}")
+        QMessageBox.critical(self, "Quick test failed", message)
+
+    @Slot()
+    def _quick_thread_finished(self) -> None:
+        if self._quick_worker is not None:
+            self._quick_worker.deleteLater()
+        if self._quick_worker_thread is not None:
+            self._quick_worker_thread.deleteLater()
+        self._quick_worker = None
+        self._quick_worker_thread = None
         if self._state not in {"monitoring", "paused", "starting"}:
             self._timer.stop()
         self._set_controls()
@@ -915,18 +1138,24 @@ class MainWindow(QMainWindow):
             "monitoring": "Monitoring active",
             "paused": "PAUSED",
             "stopping": "Stopping...",
+            "quick_running": "Quick test running",
+            "quick_completed": "Quick test complete",
             "completed": "Completed",
             "error": "Error",
             "worker_not_responding": "Worker not responding",
         }
         self._status_label.setText(labels.get(state, state.replace("_", " ").title()))
-        self._spinner.setVisible(state in {"starting", "monitoring", "stopping"})
+        self._spinner.setVisible(state in {"starting", "monitoring", "stopping", "quick_running"})
+        if state in {"starting", "monitoring", "stopping"}:
+            self._spinner.setRange(0, 0)
+            self._spinner.setTextVisible(False)
         self._set_controls()
         self._update_timer_labels()
 
     def _set_controls(self) -> None:
         active = self._is_active()
         self._actions["start"].setEnabled(not active)
+        self._actions["quick_test"].setEnabled(not active)
         self._actions["new_test"].setEnabled(not active)
         self._actions["settings"].setEnabled(not active)
         self._actions["pause"].setEnabled(
@@ -943,6 +1172,7 @@ class MainWindow(QMainWindow):
             "paused",
             "stopping",
             "worker_not_responding",
+            "quick_running",
         }
 
     def _update_timer_labels(self) -> None:
@@ -952,6 +1182,8 @@ class MainWindow(QMainWindow):
             return
         elapsed = int(time.monotonic() - self._started_monotonic)
         self._elapsed_label.setText(f"Elapsed: {_format_duration(elapsed)}")
+        if self._state == "quick_running":
+            return
         if self._session_config.cycle_count is not None:
             self._remaining_label.setText(
                 f"Cycle {self._completed_cycles} of {self._session_config.cycle_count}"
@@ -1025,6 +1257,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._worker is not None:
             self._worker.stop()
+        if self._quick_worker is not None:
+            self._quick_worker.cancel()
         self.signals.stop_monitoring_requested.emit()
         super().closeEvent(event)
 
@@ -1169,6 +1403,41 @@ def _measurement_result_text(measurement: Measurement) -> str:
     if measurement.rtt_ms is not None:
         return f"{measurement.rtt_ms:.0f} ms"
     return "Succeeded"
+
+
+def _format_quick_summary(summary: QuickTestSummary) -> str:
+    lines = [
+        "Quick Test Complete" if summary.completed else "Quick Test Incomplete",
+        f"Overall result: {summary.overall}",
+        f"Local router: {summary.local_router_status}",
+        f"Latency: {_optional_ms(summary.average_latency_ms)} average",
+        f"Peak latency: {_optional_ms(summary.peak_latency_ms)}",
+        f"Jitter: {_optional_ms(summary.jitter_ms)}",
+        f"Packet loss: {summary.packet_loss_percent:.1f}%",
+        f"DNS: {summary.dns_result}",
+        f"HTTPS: {summary.https_result}",
+        f"Download: {_optional_mbps(summary.download_mbps, summary.download_percent)}",
+        f"Upload: {_optional_mbps(summary.upload_mbps, summary.upload_percent)}",
+        f"Test duration: {summary.duration_seconds:.1f} seconds",
+    ]
+    if summary.detected_problems:
+        lines.append("Detected issue: " + summary.detected_problems[0])
+    else:
+        lines.append("Detected issue: none in this snapshot")
+    lines.append("A quick test is a snapshot and may miss intermittent problems.")
+    return "\n".join(lines)
+
+
+def _optional_ms(value: float | None) -> str:
+    return "unavailable" if value is None else f"{value:.0f} ms"
+
+
+def _optional_mbps(value: float | None, percent: float | None) -> str:
+    if value is None:
+        return "unavailable"
+    if percent is None:
+        return f"{value:.1f} Mbps"
+    return f"{value:.1f} Mbps ({percent:.1f}% of contracted speed)"
 
 
 def _format_session_config(config: SessionConfig) -> str:

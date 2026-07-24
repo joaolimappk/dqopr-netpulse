@@ -16,6 +16,27 @@ The format is based on Keep a Changelog, and this project uses semantic versioni
 - Windows build and validation workflow.
 - Release validation script for tests, release metadata, secret scans, checksums, optional executable and installer builds, and signature verification.
 
+## [0.2.0] - 2026-07-24
+
+### Added
+
+- Prominent **Run Quick Test** dashboard action for a one-cycle diagnostic snapshot.
+- Quick-test confirmation dialog with options to run the snapshot, start a 1-hour monitoring test, or cancel.
+- Quick-test progress stages, elapsed timer, activity-feed updates, cancellation through Stop, and final summary text.
+- One-cycle quick-test orchestration that reuses the monitoring engine, probe runner, SQLite storage, speed-test wrapper, CSV export, and HTML report generation.
+- Quick-test speed-test capture with graceful skipped-result storage when the speedtest CLI is unavailable.
+- Automated quick-test coverage for progress callbacks, speed-test persistence, summary generation, and contracted-speed percentages.
+
+### Changed
+
+- Dashboard export and report actions now operate on the most recent saved test session instead of only emitting placeholder signals.
+
+### Fixed
+
+- Prevented quick testing and continuous monitoring from starting at the same time.
+- Prevented duplicate quick-test starts while a test is active.
+- Ensured unknown contracted speeds do not produce percentage-of-plan values in quick-test summaries.
+
 ## [0.1.1] - 2026-07-24
 
 ### Added
