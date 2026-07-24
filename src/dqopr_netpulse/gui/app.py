@@ -691,6 +691,8 @@ class MainWindow(QMainWindow):
             ("Latency", "Starting test..."),
             ("Packet Loss", "Starting test..."),
             ("Jitter", "Starting test..."),
+            ("Download", "Waiting for quick test"),
+            ("Upload", "Waiting for quick test"),
             ("Connection to your router", "Waiting for first result"),
             ("Internet connection", "Waiting for first result"),
         )
@@ -1094,6 +1096,9 @@ class MainWindow(QMainWindow):
         self._last_quick_summary = summary
         self._last_session_id = summary.session_id
         self._quick_summary_label.setText(_format_quick_summary(summary))
+        self.set_metric("Jitter", _optional_ms(summary.jitter_ms))
+        self.set_metric("Download", _optional_mbps(summary.download_mbps, summary.download_percent))
+        self.set_metric("Upload", _optional_mbps(summary.upload_mbps, summary.upload_percent))
         self._recording_label.setText("Recording: quick test saved")
         self._append_activity(f"Quick test finished. Session ID: {summary.session_id}")
         if self._state != "error":
@@ -1221,6 +1226,8 @@ class MainWindow(QMainWindow):
     def _reset_metrics(self) -> None:
         for key in ("Latency", "Packet Loss", "Jitter"):
             self.set_metric(key, "Waiting for first result")
+        self.set_metric("Download", "Waiting for quick test")
+        self.set_metric("Upload", "Waiting for quick test")
         self.set_metric("Connection to your router", "Starting test...")
         self.set_metric("Internet connection", "Starting test...")
         self._measurement_table.setRowCount(0)

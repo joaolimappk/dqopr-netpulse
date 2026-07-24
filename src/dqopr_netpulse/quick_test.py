@@ -13,7 +13,7 @@ from dqopr_netpulse.incidents import classify_measurements
 from dqopr_netpulse.models import Measurement, ProbeMethod, SpeedTestResult
 from dqopr_netpulse.monitoring.engine import InterfaceProvider, MonitoringSession
 from dqopr_netpulse.networking import detect_active_interface
-from dqopr_netpulse.probes import ProbeRunner
+from dqopr_netpulse.probes import ProbeRunner, calculate_jitter
 from dqopr_netpulse.speedtest import run_speedtest_cli, speed_percentage
 from dqopr_netpulse.storage import NetPulseStore
 
@@ -193,6 +193,16 @@ def summarize_quick_test(
     ]
     failures = [m for m in measurements if not m.success]
     jitter_values = [float(m.jitter_ms) for m in measurements if m.jitter_ms is not None]
+    icmp_latencies = [
+        float(m.rtt_ms)
+        for m in measurements
+        if m.method == ProbeMethod.ICMP and m.success and m.rtt_ms is not None
+    ]
+    jitter_ms = (
+        sum(jitter_values) / len(jitter_values)
+        if jitter_values
+        else calculate_jitter(icmp_latencies)
+    )
     dns_samples = [m for m in measurements if m.method == ProbeMethod.DNS]
     https_samples = [m for m in measurements if m.method == ProbeMethod.HTTPS]
     gateway_samples = [m for m in measurements if m.target_name == "Local Gateway"]
@@ -216,7 +226,7 @@ def summarize_quick_test(
         if successful_latencies
         else None,
         peak_latency_ms=max(successful_latencies) if successful_latencies else None,
-        jitter_ms=sum(jitter_values) / len(jitter_values) if jitter_values else None,
+        jitter_ms=jitter_ms,
         packet_loss_percent=packet_loss_percent,
         dns_result=_sample_status(dns_samples),
         https_result=_sample_status(https_samples),

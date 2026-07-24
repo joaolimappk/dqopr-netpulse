@@ -16,6 +16,19 @@ The format is based on Keep a Changelog, and this project uses semantic versioni
 - Windows build and validation workflow.
 - Release validation script for tests, release metadata, secret scans, checksums, optional executable and installer builds, and signature verification.
 
+## [0.2.1] - 2026-07-24
+
+### Added
+
+- Built-in HTTPS download/upload speed-test fallback for systems that do not have the external speedtest CLI installed.
+- Download and Upload dashboard result cards for quick-test snapshots.
+- Regression coverage for built-in speed testing and quick-test jitter summaries.
+
+### Fixed
+
+- Fixed quick tests reporting download and upload as unavailable solely because the speedtest CLI was missing.
+- Fixed quick-test jitter staying blank when the one-cycle test had ICMP latency samples but no prior per-target jitter history.
+
 ## [0.2.0] - 2026-07-24
 
 ### Added

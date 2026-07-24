@@ -150,6 +150,8 @@ def test_quick_test_runs_one_cycle_speed_test_and_persists_results(tmp_path: Pat
     assert summary.upload_mbps == 20.0
     assert summary.download_percent == 75.0
     assert summary.upload_percent == 50.0
+    assert summary.jitter_ms is not None
+    assert summary.jitter_ms > 0
     assert len(measurements) == 5
     assert len(stored_measurements) == 5
     assert len(stored_speeds) == 1
