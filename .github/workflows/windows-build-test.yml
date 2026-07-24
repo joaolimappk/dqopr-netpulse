@@ -1,0 +1,146 @@
+name: Windows build and test
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-test-installer:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Python application and build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install pyinstaller
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Run automated tests and static checks
+        shell: pwsh
+        run: |
+          python -m ruff format --check .
+          python -m ruff check .
+          python -m mypy src\dqopr_netpulse
+          python -m pytest
+
+      - name: Prepare release artifact directory
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force release_artifacts | Out-Null
+
+      - name: Build application with PyInstaller
+        shell: pwsh
+        run: |
+          pyinstaller `
+            --name DQOPR-NetPulse `
+            --noconfirm `
+            --clean `
+            --windowed `
+            --noupx `
+            --paths src `
+            src\dqopr_netpulse\gui\app.py `
+            *> release_artifacts\pyinstaller.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content release_artifacts\pyinstaller.log
+            exit $LASTEXITCODE
+          }
+
+      - name: Verify PyInstaller output
+        shell: pwsh
+        run: |
+          $exe = "dist\DQOPR-NetPulse\DQOPR-NetPulse.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Error "PyInstaller did not create expected executable: $exe"
+          }
+          Get-Item $exe
+
+      - name: Build Inno Setup installer
+        shell: pwsh
+        run: |
+          $version = python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"
+          $env:DQOPR_NETPULSE_VERSION = $version
+          $env:DQOPR_NETPULSE_SOURCE_DIR = (Resolve-Path "dist\DQOPR-NetPulse").Path
+          $env:DQOPR_NETPULSE_OUTPUT_DIR = (Resolve-Path "release_artifacts").Path
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) {
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $iscc)) {
+            Write-Error "Inno Setup compiler was not found after installation."
+          }
+          & $iscc packaging\windows\netpulse.iss *> release_artifacts\inno-setup.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content release_artifacts\inno-setup.log
+            exit $LASTEXITCODE
+          }
+
+      - name: Verify final installer exists
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem release_artifacts -Filter "DQOPR-NetPulse-Setup-*.exe")
+          if ($installers.Count -eq 0) {
+            Write-Error "Installer was not created. Expected release_artifacts\DQOPR-NetPulse-Setup-*.exe"
+          }
+          $installers | Format-Table Name, Length, LastWriteTime
+
+      - name: Generate SHA-256 checksum and build metadata
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem release_artifacts -Filter "DQOPR-NetPulse-Setup-*.exe")
+          if ($installers.Count -eq 0) {
+            Write-Error "Cannot generate checksum because no installer exists."
+          }
+          $lines = foreach ($installer in $installers) {
+            $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName
+            "$($hash.Hash.ToLowerInvariant())  $($installer.Name)"
+          }
+          $lines | Set-Content -Encoding ascii release_artifacts\SHA256SUMS.txt
+          $version = python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"
+          $metadata = [ordered]@{
+            product = "DQOPR NetPulse"
+            publisher = "DQOPR"
+            copyright = "Copyright © 2026 DQOPR"
+            version = $version
+            commit = "${{ github.sha }}"
+            ref = "${{ github.ref }}"
+            workflow = "${{ github.workflow }}"
+            run_id = "${{ github.run_id }}"
+            runner_os = "${{ runner.os }}"
+            installer_files = @($installers | ForEach-Object { $_.Name })
+            installer_tool = "Inno Setup"
+            signed = $false
+          }
+          $metadata | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 release_artifacts\build_metadata.json
+          Copy-Item LICENSE, NOTICE, README.md, THIRD_PARTY_NOTICES.md release_artifacts\
+          Get-Content release_artifacts\SHA256SUMS.txt
+
+      - name: Upload installer, checksums, logs, and release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: dqopr-netpulse-windows-installer
+          path: |
+            release_artifacts\DQOPR-NetPulse-Setup-*.exe
+            release_artifacts\SHA256SUMS.txt
+            release_artifacts\build_metadata.json
+            release_artifacts\pyinstaller.log
+            release_artifacts\inno-setup.log
+            release_artifacts\LICENSE
+            release_artifacts\NOTICE
+            release_artifacts\README.md
+            release_artifacts\THIRD_PARTY_NOTICES.md
+          if-no-files-found: error
