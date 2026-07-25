@@ -18,6 +18,7 @@ Version: `0.3.0-alpha`
 - Added per-target/per-method jitter calculation.
 - Added initial SQLite schema bootstrap with WAL and foreign-key setup.
 - Added Linux-compatible .NET tests for the initial core methodology.
+- Added Windows GitHub Actions build/test/publish workflow for the C# branch.
 
 ## In Progress
 
@@ -59,5 +60,6 @@ Version: `0.3.0-alpha`
 - `python3 -m ruff check .`: passed.
 - `python3 -m mypy src/dqopr_netpulse`: passed.
 - `python3 -m pytest -q`: passed, 24 tests with 2 skipped.
-- Windows verification: not yet completed.
+- GitHub Actions run `30141005831`: passed on `windows-latest`, built, tested, published WPF app artifact `dqopr-netpulse-csharp-win-x64`.
+- Windows runtime verification: not yet completed.
 - Installer verification: not yet started.
