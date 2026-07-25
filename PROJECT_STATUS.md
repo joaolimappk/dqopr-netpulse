@@ -60,8 +60,8 @@ Version: `0.3.0-alpha`
 - `python3 -m ruff check .`: passed.
 - `python3 -m mypy src/dqopr_netpulse`: passed.
 - `python3 -m pytest -q`: passed, 24 tests with 2 skipped.
-- GitHub Actions run `30142727076`: passed on `windows-latest`, built, tested, published WPF app artifact `dqopr-netpulse-csharp-win-x64`, and uploaded smoke evidence artifact `dqopr-netpulse-csharp-smoke-evidence`.
+- GitHub Actions run `30142831951`: passed on `windows-latest` for commit `7a7b1a9b087a17bcfe1bddea77895ef3c4bbc11f`, built, tested, published WPF app artifact `dqopr-netpulse-csharp-win-x64`, and uploaded smoke evidence artifact `dqopr-netpulse-csharp-smoke-evidence`.
 - Smoke evidence artifact `dqopr-netpulse-csharp-smoke-evidence`: verified locally after download; includes `active-monitoring.png`, `quick-test-complete.png`, `netpulse-smoke.sqlite3`, `measurements-export.json`, and `smoke_metadata.json`.
-- Smoke SQLite evidence: 2 sessions, 37 measurements, 6 speed-test rows, 4 network-interface events.
+- Smoke SQLite evidence: 2 sessions, 38 measurements, 6 speed-test rows, 5 network-interface events, 0 incidents.
 - Real attended Windows desktop verification: not yet completed.
 - Installer verification: not yet started.
