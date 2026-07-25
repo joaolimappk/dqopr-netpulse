@@ -31,7 +31,7 @@ public sealed class QuickTestRunner(
 
         try
         {
-            OnActivity("Detecting connection.");
+            OnActivity("Detecting network.");
             var snapshot = await environment.GetActiveInterfaceAsync(cancellationToken).ConfigureAwait(false);
             var networkEvent = new NetworkInterfaceEvent(session.Id, snapshot.ObservedAt, "quick-test-snapshot", snapshot.InterfaceName, snapshot.Gateway, snapshot.Description);
             await store.SaveNetworkInterfaceEventAsync(networkEvent, cancellationToken).ConfigureAwait(false);
@@ -40,11 +40,13 @@ public sealed class QuickTestRunner(
             if (!string.IsNullOrWhiteSpace(snapshot.Gateway))
             {
                 var gatewayTarget = new TargetDefinition("Local Gateway", TargetPurpose.LocalGateway, snapshot.Gateway);
+                OnActivity("Testing router.");
                 await RunIcmpBurstAsync(session.Id, gatewayTarget, options, measurements, cancellationToken).ConfigureAwait(false);
             }
 
             foreach (var target in targets.IcmpTargets)
             {
+                OnActivity($"Testing internet latency to {target.Name} ({target.Host}).");
                 await RunIcmpBurstAsync(session.Id, target, options, measurements, cancellationToken).ConfigureAwait(false);
             }
 
@@ -62,24 +64,33 @@ public sealed class QuickTestRunner(
 
             if (options.IncludeDownloadEstimate || options.IncludeUploadEstimate)
             {
-                OnActivity("Measuring download and upload throughput.");
-                foreach (var speed in await probes.RunSpeedTestAsync(session.Id, targets.DownloadUri, targets.UploadUri, TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false))
+                OnActivity("Warming up download.");
+                OnActivity("Measuring download.");
+                OnActivity("Warming up upload.");
+                OnActivity("Measuring upload.");
+                foreach (var speed in await probes.RunSpeedTestAsync(session.Id, targets.DownloadUri, targets.UploadUri, TimeSpan.FromSeconds(45), cancellationToken).ConfigureAwait(false))
                 {
                     await store.SaveSpeedTestAsync(speed, cancellationToken).ConfigureAwait(false);
                     speeds.Add(speed);
                 }
             }
 
+            OnActivity("Calculating statistics.");
             session = session with
             {
                 EndedAt = clock.UtcNow,
                 Status = SessionStatus.Completed,
                 ActiveDuration = clock.GetElapsedTime(started)
             };
+            OnActivity("Saving results.");
             await store.UpdateSessionAsync(session, cancellationToken).ConfigureAwait(false);
             OnActivity("Quick Test completed.");
 
-            return new QuickTestResult(session, measurements, speeds, "Quick Test completed. A Quick Test is a snapshot and may miss intermittent problems.");
+            var invalidSpeeds = speeds.Where(speed => speed.ResultStatus is not (SpeedResultStatus.Valid or SpeedResultStatus.Degraded)).ToArray();
+            var summary = invalidSpeeds.Length == 0
+                ? "Quick Test completed. A Quick Test is a snapshot and may miss intermittent problems."
+                : $"Partial test - {string.Join(", ", invalidSpeeds.Select(speed => $"{speed.Direction} {speed.ResultStatus}"))}.";
+            return new QuickTestResult(session, measurements, speeds, summary);
         }
         catch
         {

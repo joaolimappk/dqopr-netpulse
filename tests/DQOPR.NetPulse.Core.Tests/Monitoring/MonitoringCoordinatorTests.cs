@@ -33,12 +33,31 @@ public sealed class MonitoringCoordinatorTests
             DnsHostname: "example.com",
             HttpsUri: new Uri("https://www.example.com/"),
             DownloadUri: new Uri("https://speed.cloudflare.com/__down?bytes=1"),
-            UploadUri: new Uri("https://httpbin.org/post"));
+            UploadUri: new Uri("https://speed.cloudflare.com/__up"));
 
-        await runner.RunAsync(new() { ProbeBurstCount = 10, ProbeSpacing = TimeSpan.FromMilliseconds(100) }, targets, CancellationToken.None);
+        await runner.RunAsync(new() { ProbeBurstCount = 20, ProbeSpacing = TimeSpan.FromMilliseconds(100) }, targets, CancellationToken.None);
 
-        Assert.Equal(30, probes.IcmpProbeCount);
-        Assert.Equal(30, store.Measurements.Count(measurement => measurement.Method == Core.Models.ProbeMethod.Icmp));
+        Assert.Equal(60, probes.IcmpProbeCount);
+        Assert.Equal(60, store.Measurements.Count(measurement => measurement.Method == Core.Models.ProbeMethod.Icmp));
+    }
+
+    [Fact]
+    public async Task QuickTestReportsPartialWhenUploadIsUnavailable()
+    {
+        var probes = new FakeProbeService
+        {
+            SpeedTestFactory = (sessionId, downloadUri, uploadUri) =>
+            [
+                new(sessionId, DateTimeOffset.UtcNow, "download", true, 50, 50_000_000, TimeSpan.FromSeconds(8), "fake", downloadUri.ToString(), null, null),
+                new(sessionId, DateTimeOffset.UtcNow, "upload", false, null, 0, TimeSpan.FromSeconds(8), "fake", uploadUri.ToString(), "HttpRequestException", "Upload failed.", Core.Models.SpeedResultStatus.UploadEndpointUnavailable)
+            ]
+        };
+        var runner = new QuickTestRunner(probes, new FakeEnvironment(), new FakeStore(), new FakeClock());
+
+        var result = await runner.RunAsync(new() { ProbeBurstCount = 20, ProbeSpacing = TimeSpan.FromMilliseconds(100) }, MonitoringTargets.Defaults, CancellationToken.None);
+
+        Assert.Contains("Partial test", result.Summary, StringComparison.Ordinal);
+        Assert.Contains("upload", result.Summary, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

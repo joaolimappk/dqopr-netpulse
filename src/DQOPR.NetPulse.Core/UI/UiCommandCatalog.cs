@@ -37,6 +37,7 @@ public static class UiCommandCatalog
         new("Reports", "JSON export", "MainWindow.xaml", "ExportJsonCommand", true, true, true, "Writes JSON export."),
         new("Reports", "HTML report", "MainWindow.xaml", "GenerateHtmlReportCommand", true, true, true, "Writes standalone HTML report."),
         new("Reports", "Open generated file", "MainWindow.xaml", "OpenLastExportCommand", true, true, true, "Opens the latest generated export when one exists."),
+        new("Reports", "Save Reference Result", "MainWindow.xaml", "SaveReferenceResultCommand", true, true, true, "Stores an external speed-test reference result for validation comparison."),
         new("Activity Log", "Copy", "MainWindow.xaml", "CopyAllActivityCommand", true, true, true, "Copies the activity log."),
         new("Activity Log", "Save Log", "MainWindow.xaml", "SaveActivityLogCommand", true, true, true, "Saves the activity log."),
         new("Activity Log", "Clear", "MainWindow.xaml", "ClearActivityCommand", true, true, true, "Clears the visible activity log."),

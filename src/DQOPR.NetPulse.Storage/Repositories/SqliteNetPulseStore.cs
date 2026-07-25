@@ -15,8 +15,8 @@ public sealed class SqliteNetPulseStore(string connectionString) : INetPulseStor
     public async Task CreateSessionAsync(MonitoringSession session, CancellationToken cancellationToken)
     {
         const string sql = """
-            INSERT INTO sessions (id, started_at, ended_at, profile_name, active_duration_seconds, paused_duration_seconds, status)
-            VALUES ($id, $started_at, $ended_at, $profile_name, $active_duration_seconds, $paused_duration_seconds, $status);
+            INSERT INTO sessions (id, started_at, ended_at, profile_name, active_duration_seconds, paused_duration_seconds, status, methodology_version)
+            VALUES ($id, $started_at, $ended_at, $profile_name, $active_duration_seconds, $paused_duration_seconds, $status, $methodology_version);
             """;
         await ExecuteAsync(sql, AddSessionParameters(session), cancellationToken).ConfigureAwait(false);
     }
@@ -28,7 +28,8 @@ public sealed class SqliteNetPulseStore(string connectionString) : INetPulseStor
             SET ended_at = $ended_at,
                 active_duration_seconds = $active_duration_seconds,
                 paused_duration_seconds = $paused_duration_seconds,
-                status = $status
+                status = $status,
+                methodology_version = $methodology_version
             WHERE id = $id;
             """;
         await ExecuteAsync(sql, AddSessionParameters(session), cancellationToken).ConfigureAwait(false);
@@ -40,7 +41,7 @@ public sealed class SqliteNetPulseStore(string connectionString) : INetPulseStor
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, started_at, ended_at, profile_name, active_duration_seconds, paused_duration_seconds, status
+            SELECT id, started_at, ended_at, profile_name, active_duration_seconds, paused_duration_seconds, status, methodology_version
             FROM sessions
             ORDER BY started_at DESC;
             """;
@@ -55,7 +56,8 @@ public sealed class SqliteNetPulseStore(string connectionString) : INetPulseStor
                 reader.GetString(3),
                 TimeSpan.FromSeconds(reader.GetInt64(4)),
                 TimeSpan.FromSeconds(reader.GetInt64(5)),
-                Enum.Parse<SessionStatus>(reader.GetString(6))));
+                Enum.Parse<SessionStatus>(reader.GetString(6)),
+                reader.GetString(7)));
         }
 
         return sessions;
@@ -81,8 +83,8 @@ public sealed class SqliteNetPulseStore(string connectionString) : INetPulseStor
     public async Task SaveMeasurementAsync(ProbeMeasurement measurement, CancellationToken cancellationToken)
     {
         const string sql = """
-            INSERT INTO measurements (session_id, observed_at, method, target_name, succeeded, latency_ms, failure_category, failure_message)
-            VALUES ($session_id, $observed_at, $method, $target_name, $succeeded, $latency_ms, $failure_category, $failure_message);
+            INSERT INTO measurements (session_id, observed_at, method, target_name, succeeded, latency_ms, failure_category, failure_message, target_host, address_family, probe_stream_id, sequence, methodology_version)
+            VALUES ($session_id, $observed_at, $method, $target_name, $succeeded, $latency_ms, $failure_category, $failure_message, $target_host, $address_family, $probe_stream_id, $sequence, $methodology_version);
             """;
         await ExecuteAsync(
             sql,
@@ -96,6 +98,11 @@ public sealed class SqliteNetPulseStore(string connectionString) : INetPulseStor
                 command.Parameters.AddWithValue("$latency_ms", (object?)measurement.LatencyMilliseconds ?? DBNull.Value);
                 command.Parameters.AddWithValue("$failure_category", (object?)measurement.FailureCategory ?? DBNull.Value);
                 command.Parameters.AddWithValue("$failure_message", (object?)measurement.FailureMessage ?? DBNull.Value);
+                command.Parameters.AddWithValue("$target_host", (object?)measurement.TargetHost ?? DBNull.Value);
+                command.Parameters.AddWithValue("$address_family", (object?)measurement.AddressFamily ?? DBNull.Value);
+                command.Parameters.AddWithValue("$probe_stream_id", (object?)measurement.ProbeStreamId ?? DBNull.Value);
+                command.Parameters.AddWithValue("$sequence", (object?)measurement.Sequence ?? DBNull.Value);
+                command.Parameters.AddWithValue("$methodology_version", measurement.MethodologyVersion);
             },
             cancellationToken).ConfigureAwait(false);
     }
@@ -103,8 +110,8 @@ public sealed class SqliteNetPulseStore(string connectionString) : INetPulseStor
     public async Task SaveSpeedTestAsync(SpeedTestMeasurement measurement, CancellationToken cancellationToken)
     {
         const string sql = """
-            INSERT INTO speed_tests (session_id, observed_at, direction, succeeded, mbps, bytes_transferred, active_duration_ms, provider, endpoint, failure_category, failure_message)
-            VALUES ($session_id, $observed_at, $direction, $succeeded, $mbps, $bytes_transferred, $active_duration_ms, $provider, $endpoint, $failure_category, $failure_message);
+            INSERT INTO speed_tests (session_id, observed_at, direction, succeeded, mbps, bytes_transferred, active_duration_ms, provider, endpoint, failure_category, failure_message, result_status, setup_duration_ms, transfer_duration_ms, warmup_duration_ms, parallel_stream_count, http_version, methodology_version, diagnostic_json)
+            VALUES ($session_id, $observed_at, $direction, $succeeded, $mbps, $bytes_transferred, $active_duration_ms, $provider, $endpoint, $failure_category, $failure_message, $result_status, $setup_duration_ms, $transfer_duration_ms, $warmup_duration_ms, $parallel_stream_count, $http_version, $methodology_version, $diagnostic_json);
             """;
         await ExecuteAsync(
             sql,
@@ -121,6 +128,14 @@ public sealed class SqliteNetPulseStore(string connectionString) : INetPulseStor
                 command.Parameters.AddWithValue("$endpoint", (object?)measurement.Endpoint ?? DBNull.Value);
                 command.Parameters.AddWithValue("$failure_category", (object?)measurement.FailureCategory ?? DBNull.Value);
                 command.Parameters.AddWithValue("$failure_message", (object?)measurement.FailureMessage ?? DBNull.Value);
+                command.Parameters.AddWithValue("$result_status", measurement.ResultStatus);
+                command.Parameters.AddWithValue("$setup_duration_ms", (object?)measurement.SetupDuration?.TotalMilliseconds ?? DBNull.Value);
+                command.Parameters.AddWithValue("$transfer_duration_ms", (object?)measurement.TransferDuration?.TotalMilliseconds ?? DBNull.Value);
+                command.Parameters.AddWithValue("$warmup_duration_ms", (object?)measurement.WarmupDuration?.TotalMilliseconds ?? DBNull.Value);
+                command.Parameters.AddWithValue("$parallel_stream_count", measurement.ParallelStreamCount);
+                command.Parameters.AddWithValue("$http_version", (object?)measurement.HttpVersion ?? DBNull.Value);
+                command.Parameters.AddWithValue("$methodology_version", measurement.MethodologyVersion);
+                command.Parameters.AddWithValue("$diagnostic_json", (object?)measurement.DiagnosticJson ?? DBNull.Value);
             },
             cancellationToken).ConfigureAwait(false);
     }
@@ -163,13 +178,35 @@ public sealed class SqliteNetPulseStore(string connectionString) : INetPulseStor
             cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task SaveReferenceSpeedResultAsync(ReferenceSpeedResult result, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            INSERT INTO reference_speed_results (id, session_id, observed_at, provider, download_mbps, upload_mbps, latency_ms, notes)
+            VALUES ($id, $session_id, $observed_at, $provider, $download_mbps, $upload_mbps, $latency_ms, $notes);
+            """;
+        await ExecuteAsync(
+            sql,
+            command =>
+            {
+                command.Parameters.AddWithValue("$id", result.Id.ToString());
+                command.Parameters.AddWithValue("$session_id", (object?)result.SessionId?.ToString() ?? DBNull.Value);
+                command.Parameters.AddWithValue("$observed_at", result.ObservedAt.ToString("O"));
+                command.Parameters.AddWithValue("$provider", result.Provider);
+                command.Parameters.AddWithValue("$download_mbps", (object?)result.DownloadMegabitsPerSecond ?? DBNull.Value);
+                command.Parameters.AddWithValue("$upload_mbps", (object?)result.UploadMegabitsPerSecond ?? DBNull.Value);
+                command.Parameters.AddWithValue("$latency_ms", (object?)result.LatencyMilliseconds ?? DBNull.Value);
+                command.Parameters.AddWithValue("$notes", (object?)result.Notes ?? DBNull.Value);
+            },
+            cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<IReadOnlyList<ProbeMeasurement>> GetMeasurementsAsync(Guid sessionId, CancellationToken cancellationToken)
     {
         var measurements = new List<ProbeMeasurement>();
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT observed_at, method, target_name, succeeded, latency_ms, failure_category, failure_message
+            SELECT observed_at, method, target_name, succeeded, latency_ms, failure_category, failure_message, target_host, address_family, probe_stream_id, sequence, methodology_version
             FROM measurements
             WHERE session_id = $session_id
             ORDER BY observed_at, id;
@@ -187,7 +224,12 @@ public sealed class SqliteNetPulseStore(string connectionString) : INetPulseStor
                 reader.GetInt64(3) == 1,
                 reader.IsDBNull(4) ? null : reader.GetDouble(4),
                 reader.IsDBNull(5) ? null : reader.GetString(5),
-                reader.IsDBNull(6) ? null : reader.GetString(6)));
+                reader.IsDBNull(6) ? null : reader.GetString(6),
+                reader.IsDBNull(7) ? null : reader.GetString(7),
+                reader.IsDBNull(8) ? null : reader.GetString(8),
+                reader.IsDBNull(9) ? null : reader.GetString(9),
+                reader.IsDBNull(10) ? null : reader.GetInt32(10),
+                reader.GetString(11)));
         }
 
         return measurements;
@@ -199,7 +241,7 @@ public sealed class SqliteNetPulseStore(string connectionString) : INetPulseStor
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT observed_at, direction, succeeded, mbps, bytes_transferred, active_duration_ms, provider, endpoint, failure_category, failure_message
+            SELECT observed_at, direction, succeeded, mbps, bytes_transferred, active_duration_ms, provider, endpoint, failure_category, failure_message, result_status, setup_duration_ms, transfer_duration_ms, warmup_duration_ms, parallel_stream_count, http_version, methodology_version, diagnostic_json
             FROM speed_tests
             WHERE session_id = $session_id
             ORDER BY observed_at, id;
@@ -220,7 +262,15 @@ public sealed class SqliteNetPulseStore(string connectionString) : INetPulseStor
                 reader.GetString(6),
                 reader.IsDBNull(7) ? null : reader.GetString(7),
                 reader.IsDBNull(8) ? null : reader.GetString(8),
-                reader.IsDBNull(9) ? null : reader.GetString(9)));
+                reader.IsDBNull(9) ? null : reader.GetString(9),
+                reader.GetString(10),
+                reader.IsDBNull(11) ? null : TimeSpan.FromMilliseconds(reader.GetDouble(11)),
+                reader.IsDBNull(12) ? null : TimeSpan.FromMilliseconds(reader.GetDouble(12)),
+                reader.IsDBNull(13) ? null : TimeSpan.FromMilliseconds(reader.GetDouble(13)),
+                reader.GetInt32(14),
+                reader.IsDBNull(15) ? null : reader.GetString(15),
+                reader.GetString(16),
+                reader.IsDBNull(17) ? null : reader.GetString(17)));
         }
 
         return speedTests;
@@ -280,11 +330,50 @@ public sealed class SqliteNetPulseStore(string connectionString) : INetPulseStor
         return markers;
     }
 
+    public async Task<IReadOnlyList<ReferenceSpeedResult>> GetReferenceSpeedResultsAsync(Guid? sessionId, CancellationToken cancellationToken)
+    {
+        var results = new List<ReferenceSpeedResult>();
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = sessionId is null
+            ? """
+              SELECT id, session_id, observed_at, provider, download_mbps, upload_mbps, latency_ms, notes
+              FROM reference_speed_results
+              ORDER BY observed_at DESC;
+              """
+            : """
+              SELECT id, session_id, observed_at, provider, download_mbps, upload_mbps, latency_ms, notes
+              FROM reference_speed_results
+              WHERE session_id = $session_id
+              ORDER BY observed_at DESC;
+              """;
+        if (sessionId is not null)
+        {
+            command.Parameters.AddWithValue("$session_id", sessionId.Value.ToString());
+        }
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            results.Add(new ReferenceSpeedResult(
+                Guid.Parse(reader.GetString(0)),
+                reader.IsDBNull(1) ? null : Guid.Parse(reader.GetString(1)),
+                DateTimeOffset.Parse(reader.GetString(2)),
+                reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetDouble(4),
+                reader.IsDBNull(5) ? null : reader.GetDouble(5),
+                reader.IsDBNull(6) ? null : reader.GetDouble(6),
+                reader.IsDBNull(7) ? null : reader.GetString(7)));
+        }
+
+        return results;
+    }
+
     public async Task DeleteSessionAsync(Guid sessionId, CancellationToken cancellationToken)
     {
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-        foreach (var table in new[] { "measurements", "speed_tests", "incidents", "manual_markers", "network_interface_events", "sessions" })
+        foreach (var table in new[] { "measurements", "speed_tests", "incidents", "manual_markers", "network_interface_events", "reference_speed_results", "sessions" })
         {
             await using var command = connection.CreateCommand();
             command.Transaction = (SqliteTransaction)transaction;
@@ -326,6 +415,7 @@ public sealed class SqliteNetPulseStore(string connectionString) : INetPulseStor
             command.Parameters.AddWithValue("$active_duration_seconds", (long)session.ActiveDuration.TotalSeconds);
             command.Parameters.AddWithValue("$paused_duration_seconds", (long)session.PausedDuration.TotalSeconds);
             command.Parameters.AddWithValue("$status", session.Status.ToString());
+            command.Parameters.AddWithValue("$methodology_version", session.MethodologyVersion);
         };
     }
 }

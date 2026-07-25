@@ -61,10 +61,10 @@ jobs:
           $evidence = Join-Path $PWD "artifacts/smoke-evidence"
           New-Item -ItemType Directory -Force -Path $evidence | Out-Null
 
-          $process = Start-Process -FilePath $exe -ArgumentList @("--ci-smoke", "--output", $evidence, "--duration-seconds", "12") -PassThru
-          if (-not $process.WaitForExit(120000)) {
+          $process = Start-Process -FilePath $exe -ArgumentList @("--ci-smoke", "--output", $evidence, "--duration-seconds", "25") -PassThru
+          if (-not $process.WaitForExit(180000)) {
             $process.Kill()
-            throw "WPF smoke test did not finish within 120 seconds"
+            throw "WPF smoke test did not finish within 180 seconds"
           }
 
           if ($process.ExitCode -ne 0) {

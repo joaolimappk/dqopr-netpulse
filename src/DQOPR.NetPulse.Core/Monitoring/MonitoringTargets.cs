@@ -24,6 +24,6 @@ public sealed record MonitoringTargets(
         ],
         DnsHostname: "example.com",
         HttpsUri: new Uri("https://www.example.com/"),
-        DownloadUri: new Uri("https://speed.cloudflare.com/__down?bytes=1000000"),
-        UploadUri: new Uri("https://httpbin.org/post"));
+        DownloadUri: new Uri("https://speed.cloudflare.com/__down?bytes=500000000"),
+        UploadUri: new Uri("https://speed.cloudflare.com/__up"));
 }

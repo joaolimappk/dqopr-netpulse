@@ -4,7 +4,7 @@ namespace DQOPR.NetPulse.Storage.Schema;
 
 public static class SchemaBootstrapper
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public static async Task InitializeAsync(string connectionString, CancellationToken cancellationToken)
     {
@@ -13,7 +13,6 @@ public static class SchemaBootstrapper
 
         await ExecuteAsync(connection, "PRAGMA foreign_keys = ON;", cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, "PRAGMA journal_mode = WAL;", cancellationToken).ConfigureAwait(false);
-        await ExecuteAsync(connection, $"PRAGMA user_version = {CurrentSchemaVersion};", cancellationToken).ConfigureAwait(false);
 
         await ExecuteAsync(
             connection,
@@ -25,10 +24,12 @@ public static class SchemaBootstrapper
                 profile_name TEXT NOT NULL,
                 active_duration_seconds INTEGER NOT NULL DEFAULT 0,
                 paused_duration_seconds INTEGER NOT NULL DEFAULT 0,
-                status TEXT NOT NULL
+                status TEXT NOT NULL,
+                methodology_version TEXT NOT NULL DEFAULT 'alpha.4'
             );
             """,
             cancellationToken).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, "sessions", "methodology_version", "TEXT NOT NULL DEFAULT 'pre-alpha.4'", cancellationToken).ConfigureAwait(false);
 
         await ExecuteAsync(
             connection,
@@ -43,10 +44,20 @@ public static class SchemaBootstrapper
                 latency_ms REAL NULL,
                 failure_category TEXT NULL,
                 failure_message TEXT NULL,
+                target_host TEXT NULL,
+                address_family TEXT NULL,
+                probe_stream_id TEXT NULL,
+                sequence INTEGER NULL,
+                methodology_version TEXT NOT NULL DEFAULT 'alpha.4',
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
             """,
             cancellationToken).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, "measurements", "target_host", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, "measurements", "address_family", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, "measurements", "probe_stream_id", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, "measurements", "sequence", "INTEGER NULL", cancellationToken).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, "measurements", "methodology_version", "TEXT NOT NULL DEFAULT 'pre-alpha.4'", cancellationToken).ConfigureAwait(false);
 
         await ExecuteAsync(
             connection,
@@ -69,10 +80,26 @@ public static class SchemaBootstrapper
                 endpoint TEXT NULL,
                 failure_category TEXT NULL,
                 failure_message TEXT NULL,
+                result_status TEXT NOT NULL DEFAULT 'Valid',
+                setup_duration_ms REAL NULL,
+                transfer_duration_ms REAL NULL,
+                warmup_duration_ms REAL NULL,
+                parallel_stream_count INTEGER NOT NULL DEFAULT 1,
+                http_version TEXT NULL,
+                methodology_version TEXT NOT NULL DEFAULT 'alpha.4',
+                diagnostic_json TEXT NULL,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
             """,
             cancellationToken).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, "speed_tests", "result_status", "TEXT NOT NULL DEFAULT 'Legacy estimate - methodology version prior to alpha.4'", cancellationToken).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, "speed_tests", "setup_duration_ms", "REAL NULL", cancellationToken).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, "speed_tests", "transfer_duration_ms", "REAL NULL", cancellationToken).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, "speed_tests", "warmup_duration_ms", "REAL NULL", cancellationToken).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, "speed_tests", "parallel_stream_count", "INTEGER NOT NULL DEFAULT 1", cancellationToken).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, "speed_tests", "http_version", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, "speed_tests", "methodology_version", "TEXT NOT NULL DEFAULT 'pre-alpha.4'", cancellationToken).ConfigureAwait(false);
+        await AddColumnIfMissingAsync(connection, "speed_tests", "diagnostic_json", "TEXT NULL", cancellationToken).ConfigureAwait(false);
 
         await ExecuteAsync(
             connection,
@@ -119,6 +146,25 @@ public static class SchemaBootstrapper
             );
             """,
             cancellationToken).ConfigureAwait(false);
+
+        await ExecuteAsync(
+            connection,
+            """
+            CREATE TABLE IF NOT EXISTS reference_speed_results (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NULL,
+                observed_at TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                download_mbps REAL NULL,
+                upload_mbps REAL NULL,
+                latency_ms REAL NULL,
+                notes TEXT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            );
+            """,
+            cancellationToken).ConfigureAwait(false);
+
+        await ExecuteAsync(connection, $"PRAGMA user_version = {CurrentSchemaVersion};", cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task ExecuteAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
@@ -126,5 +172,23 @@ public static class SchemaBootstrapper
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task AddColumnIfMissingAsync(SqliteConnection connection, string table, string column, string definition, CancellationToken cancellationToken)
+    {
+        await using var probe = connection.CreateCommand();
+        probe.CommandText = $"PRAGMA table_info({table});";
+        await using (var reader = await probe.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+            }
+        }
+
+        await ExecuteAsync(connection, $"ALTER TABLE {table} ADD COLUMN {column} {definition};", cancellationToken).ConfigureAwait(false);
     }
 }

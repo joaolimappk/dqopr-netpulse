@@ -11,13 +11,21 @@ public sealed class QuickTestOptionsTests
 
         options.Validate();
 
-        Assert.InRange(options.ProbeBurstCount, 10, 20);
+        Assert.Equal(20, options.ProbeBurstCount);
     }
 
     [Fact]
     public void RejectsSingleProbeQuickTest()
     {
         var options = new QuickTestOptions { ProbeBurstCount = 1 };
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => options.Validate());
+    }
+
+    [Fact]
+    public void RejectsNineteenProbeQuickTest()
+    {
+        var options = new QuickTestOptions { ProbeBurstCount = 19 };
 
         Assert.Throws<ArgumentOutOfRangeException>(() => options.Validate());
     }

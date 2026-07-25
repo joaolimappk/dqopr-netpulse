@@ -42,6 +42,8 @@ internal sealed class FakeStore : INetPulseStore
 
     public List<ManualMarker> ManualMarkers { get; } = [];
 
+    public List<ReferenceSpeedResult> ReferenceSpeedResults { get; } = [];
+
     public Task InitializeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task CreateSessionAsync(MonitoringSession session, CancellationToken cancellationToken)
@@ -85,6 +87,12 @@ internal sealed class FakeStore : INetPulseStore
         return Task.CompletedTask;
     }
 
+    public Task SaveReferenceSpeedResultAsync(ReferenceSpeedResult result, CancellationToken cancellationToken)
+    {
+        ReferenceSpeedResults.Add(result);
+        return Task.CompletedTask;
+    }
+
     public Task<IReadOnlyList<ProbeMeasurement>> GetMeasurementsAsync(Guid sessionId, CancellationToken cancellationToken)
         => Task.FromResult<IReadOnlyList<ProbeMeasurement>>(Measurements.Where(measurement => measurement.SessionId == sessionId).ToArray());
 
@@ -97,6 +105,9 @@ internal sealed class FakeStore : INetPulseStore
     public Task<IReadOnlyList<ManualMarker>> GetManualMarkersAsync(Guid sessionId, CancellationToken cancellationToken)
         => Task.FromResult<IReadOnlyList<ManualMarker>>(ManualMarkers.Where(marker => marker.SessionId == sessionId).ToArray());
 
+    public Task<IReadOnlyList<ReferenceSpeedResult>> GetReferenceSpeedResultsAsync(Guid? sessionId, CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<ReferenceSpeedResult>>(ReferenceSpeedResults.Where(result => sessionId is null || result.SessionId == sessionId).ToArray());
+
     public Task DeleteSessionAsync(Guid sessionId, CancellationToken cancellationToken)
     {
         Sessions.RemoveAll(session => session.Id == sessionId);
@@ -104,6 +115,7 @@ internal sealed class FakeStore : INetPulseStore
         SpeedTests.RemoveAll(speed => speed.SessionId == sessionId);
         NetworkInterfaceEvents.RemoveAll(networkEvent => networkEvent.SessionId == sessionId);
         ManualMarkers.RemoveAll(marker => marker.SessionId == sessionId);
+        ReferenceSpeedResults.RemoveAll(result => result.SessionId == sessionId);
         return Task.CompletedTask;
     }
 }
@@ -112,10 +124,22 @@ internal sealed class FakeProbeService : INetworkProbeService
 {
     public int IcmpProbeCount { get; private set; }
 
+    public Func<Guid, Uri, Uri, IReadOnlyList<SpeedTestMeasurement>>? SpeedTestFactory { get; set; }
+
     public Task<ProbeMeasurement> ProbeIcmpAsync(Guid sessionId, TargetDefinition target, int sequence, TimeSpan timeout, CancellationToken cancellationToken)
     {
         IcmpProbeCount++;
-        return Task.FromResult(new ProbeMeasurement(sessionId, DateTimeOffset.UtcNow, ProbeMethod.Icmp, target.Name, true, 10 + sequence));
+        return Task.FromResult(new ProbeMeasurement(
+            sessionId,
+            DateTimeOffset.UtcNow,
+            ProbeMethod.Icmp,
+            target.Name,
+            true,
+            10 + sequence,
+            TargetHost: target.Host,
+            AddressFamily: target.Host.Contains(':', StringComparison.Ordinal) ? "IPv6" : "IPv4",
+            ProbeStreamId: $"{sessionId}:icmp:{target.Name}:{target.Host}",
+            Sequence: sequence));
     }
 
     public Task<ProbeMeasurement> ProbeTcpAsync(Guid sessionId, TargetDefinition target, TimeSpan timeout, CancellationToken cancellationToken)
@@ -128,11 +152,14 @@ internal sealed class FakeProbeService : INetworkProbeService
         => Task.FromResult(new ProbeMeasurement(sessionId, DateTimeOffset.UtcNow, ProbeMethod.Https, uri.Host, true, 25));
 
     public Task<IReadOnlyList<SpeedTestMeasurement>> RunSpeedTestAsync(Guid sessionId, Uri downloadUri, Uri uploadUri, TimeSpan timeout, CancellationToken cancellationToken)
-        => Task.FromResult<IReadOnlyList<SpeedTestMeasurement>>(
+    {
+        IReadOnlyList<SpeedTestMeasurement> results = SpeedTestFactory?.Invoke(sessionId, downloadUri, uploadUri) ??
         [
-            new SpeedTestMeasurement(sessionId, DateTimeOffset.UtcNow, "download", true, 50, 1_000_000, TimeSpan.FromSeconds(1), "fake", downloadUri.ToString(), null, null),
-            new SpeedTestMeasurement(sessionId, DateTimeOffset.UtcNow, "upload", true, 10, 250_000, TimeSpan.FromSeconds(1), "fake", uploadUri.ToString(), null, null)
-        ]);
+            new SpeedTestMeasurement(sessionId, DateTimeOffset.UtcNow, "download", true, 50, 1_000_000, TimeSpan.FromSeconds(8), "fake", downloadUri.ToString(), null, null),
+            new SpeedTestMeasurement(sessionId, DateTimeOffset.UtcNow, "upload", true, 10, 250_000, TimeSpan.FromSeconds(8), "fake", uploadUri.ToString(), null, null)
+        ];
+        return Task.FromResult(results);
+    }
 }
 
 internal sealed class FakeEnvironment : INetworkEnvironmentService

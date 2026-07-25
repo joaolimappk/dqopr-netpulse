@@ -205,7 +205,7 @@ public sealed class MonitoringCoordinator(
             new ScheduledOperation("dns", intervals.Dns, TimeSpan.FromSeconds(5), startAt),
             new ScheduledOperation("https", intervals.Https, TimeSpan.FromSeconds(10), startAt),
             new ScheduledOperation("route", intervals.RouteSnapshot, TimeSpan.FromSeconds(5), startAt),
-            new ScheduledOperation("speed-test", intervals.SpeedTest, TimeSpan.Zero, startAt)
+            new ScheduledOperation("speed-test", intervals.SpeedTest, TimeSpan.FromSeconds(45), startAt)
         ]);
     }
 

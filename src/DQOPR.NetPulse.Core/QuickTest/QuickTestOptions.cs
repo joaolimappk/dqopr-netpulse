@@ -2,7 +2,7 @@ namespace DQOPR.NetPulse.Core.QuickTest;
 
 public sealed record QuickTestOptions
 {
-    public int ProbeBurstCount { get; init; } = 12;
+    public int ProbeBurstCount { get; init; } = 20;
 
     public TimeSpan ProbeSpacing { get; init; } = TimeSpan.FromMilliseconds(250);
 
@@ -14,9 +14,9 @@ public sealed record QuickTestOptions
 
     public void Validate()
     {
-        if (ProbeBurstCount is < 10 or > 20)
+        if (ProbeBurstCount is < 20 or > 100)
         {
-            throw new ArgumentOutOfRangeException(nameof(ProbeBurstCount), "Quick Test must use 10 to 20 probes.");
+            throw new ArgumentOutOfRangeException(nameof(ProbeBurstCount), "Quick Test must use at least 20 probes.");
         }
 
         if (ProbeSpacing < TimeSpan.FromMilliseconds(100))

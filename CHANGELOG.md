@@ -8,6 +8,13 @@ The format is based on Keep a Changelog, and this project uses semantic versioni
 
 ### Added
 
+- C# measurement-correctness milestone `0.3.0-alpha.4`.
+- Forensic measurement audit documenting latency, jitter, packet-loss, throughput, persistence, export, and history semantics.
+- Scoped dashboard cards for router latency, internet latency, internet jitter, and ICMP packet loss with target attribution.
+- SQLite schema version 2 fields for methodology version, ICMP target host/address family/probe stream/sequence, speed-result status, setup/transfer/warmup durations, stream count, HTTP version, and diagnostic JSON.
+- Diagnostic evidence bundle export with raw ICMP samples, calculated ICMP statistics, throughput stream diagnostics, events, markers, and external reference results.
+- Manual external reference-result storage and comparison for validation against independent tests.
+- Local-time display in C# history/details and timezone fields in exports while retaining UTC timestamps.
 - C# WPF milestone `0.3.0-alpha.3` with implemented Dashboard, History, Session Details, Reports, Settings, Activity Log, and About pages.
 - UI functionality audit documenting visible tabs, menus, dashboard controls, context actions, export/report commands, settings controls, keyboard shortcuts, and tray status.
 - Persistent C# application settings with validation for monitoring duration, probe intervals, timeout, targets, database path, export directory, and behavior flags.
@@ -25,6 +32,12 @@ The format is based on Keep a Changelog, and this project uses semantic versioni
 
 ### Fixed
 
+- Fixed dashboard latency mixing ICMP, DNS, TCP connect, and HTTPS durations.
+- Fixed jitter calculations that could compare incompatible probe streams or stale samples from previous quick tests.
+- Fixed history average/max latency aggregating DNS/TCP/HTTPS durations as if they were ICMP RTT.
+- Fixed failed or invalid upload/download rows leaving stale numeric speed values on the dashboard.
+- Fixed Quick Test using too few ICMP samples for reliable jitter by requiring at least 20 probes per latency target.
+- Fixed built-in throughput under-reporting caused by tiny/single-stream transfers and unreliable general-purpose upload endpoint defaults.
 - C# scheduled speed-test estimates now run at session start and then on the configured interval, matching a 10-minute run with a 5-minute interval as two attempts.
 - C# Quick Test now updates dashboard download/upload estimates and active interface/gateway fields.
 - Removed blank placeholder tabs and dead top-level menu shells from the C# WPF app.

@@ -1,9 +1,10 @@
 using System.Text.Json;
 using DQOPR.NetPulse.Core.Models;
+using DQOPR.NetPulse.Diagnostics.Statistics;
 
 namespace DQOPR.NetPulse.Reporting;
 
-public static class JsonMeasurementExporter
+public static class DiagnosticBundleExporter
 {
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -12,37 +13,31 @@ public static class JsonMeasurementExporter
 
     public static async Task ExportAsync(
         string path,
-        IReadOnlyList<MonitoringSession> sessions,
+        MonitoringSession session,
         IReadOnlyList<ProbeMeasurement> measurements,
         IReadOnlyList<SpeedTestMeasurement> speedTests,
+        IReadOnlyList<NetworkInterfaceEvent> networkEvents,
+        IReadOnlyList<ManualMarker> markers,
+        IReadOnlyList<ReferenceSpeedResult> referenceResults,
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)) ?? ".");
+        var icmpStats = measurements
+            .Where(measurement => measurement.Method == ProbeMethod.Icmp)
+            .GroupBy(LatencySeriesKey.From)
+            .Select(group => JitterCalculator.CalculateIcmpStatistics(measurements, group.Key))
+            .ToArray();
+
         var payload = new
         {
-            exportedAt = DateTimeOffset.UtcNow,
+            exportedAtUtc = DateTimeOffset.UtcNow,
             exportedAtLocal = DateTimeOffset.Now,
             timezone = DateTimeOffset.Now.Offset.ToString(),
             methodologyVersion = MeasurementMethodology.CurrentVersion,
-            note = "Anonymized CI smoke export. Do not treat GitHub runner measurements as a user ISP path.",
-            sessions,
-            measurements = measurements.Select(measurement => new
-            {
-                measurement.SessionId,
-                observedAtUtc = measurement.ObservedAt,
-                observedAtLocal = measurement.ObservedAt.ToLocalTime(),
-                measurement.Method,
-                measurement.TargetName,
-                measurement.TargetHost,
-                measurement.AddressFamily,
-                measurement.ProbeStreamId,
-                measurement.Sequence,
-                measurement.Succeeded,
-                measurement.LatencyMilliseconds,
-                measurement.FailureCategory,
-                measurement.FailureMessage,
-                measurement.MethodologyVersion
-            }),
+            session,
+            rawIcmpSamples = measurements.Where(measurement => measurement.Method == ProbeMethod.Icmp),
+            connectivityMeasurements = measurements.Where(measurement => measurement.Method is ProbeMethod.Dns or ProbeMethod.TcpConnect or ProbeMethod.Https),
+            icmpStatistics = icmpStats,
             speedTests = speedTests.Select(speed => new
             {
                 speed.SessionId,
@@ -50,35 +45,33 @@ public static class JsonMeasurementExporter
                 observedAtLocal = speed.ObservedAt.ToLocalTime(),
                 speed.Direction,
                 speed.Succeeded,
+                speed.ResultStatus,
                 speed.MegabitsPerSecond,
                 speed.BytesTransferred,
                 speed.ActiveDuration,
-                speed.ResultStatus,
                 speed.SetupDuration,
                 speed.TransferDuration,
                 speed.WarmupDuration,
                 speed.ParallelStreamCount,
                 speed.HttpVersion,
                 speed.Provider,
-                Endpoint = MaskEndpoint(speed.Endpoint),
-                speed.MethodologyVersion,
+                speed.Endpoint,
                 speed.FailureCategory,
                 speed.FailureMessage,
+                speed.MethodologyVersion,
                 speed.DiagnosticJson
-            })
+            }),
+            networkEvents,
+            markers,
+            referenceResults,
+            notes = new[]
+            {
+                "No request headers, response headers, credentials, or payload bytes are included.",
+                "Throughput diagnostics contain endpoint names, stream byte counts, durations, HTTP version, and safe exception category/message only."
+            }
         };
 
         await using var stream = File.Create(path);
         await JsonSerializer.SerializeAsync(stream, payload, Options, cancellationToken).ConfigureAwait(false);
-    }
-
-    private static string? MaskEndpoint(string? endpoint)
-    {
-        if (endpoint is null || !Uri.TryCreate(endpoint, UriKind.Absolute, out var uri))
-        {
-            return endpoint;
-        }
-
-        return $"{uri.Scheme}://{uri.Host}/...";
     }
 }

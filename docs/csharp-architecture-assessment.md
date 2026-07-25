@@ -8,7 +8,7 @@ The rewrite should preserve those product ideas but correct the parts that weake
 - A slow HTTPS or speed test must not block latency probes.
 - Packet loss must mean packet-oriented ICMP loss, not mixed DNS/TCP/HTTPS failures.
 - DNS, TCP, HTTPS, and speed-test failures must be reported as separate rates.
-- Jitter must be computed only within the same target and probe method.
+- Jitter must be computed only within the same ICMP session, target, host, address family, and probe stream.
 - Quick Test must use a burst of samples, not a one-probe snapshot.
 - Incidents must be stateful events with lifecycle, recovery, merging, and supporting context.
 - Sleep/resume and interface changes must not be mislabeled as ISP outages.

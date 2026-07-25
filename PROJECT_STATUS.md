@@ -2,7 +2,7 @@
 
 Branch: `csharp-rewrite`
 
-Version: `0.3.0-alpha.3`
+Version: `0.3.0-alpha.4`
 
 ## Completed
 
@@ -13,28 +13,28 @@ Version: `0.3.0-alpha.3`
 - Added initial WPF dashboard shell.
 - Added .NET version metadata.
 - Added independent schedule calculator and monitoring schedule contracts.
-- Added Quick Test options requiring 10 to 20 probes.
+- Added Quick Test options requiring at least 20 probes.
 - Added ICMP-only packet-loss calculation.
-- Added per-target/per-method jitter calculation.
-- Added initial SQLite schema bootstrap with WAL and foreign-key setup.
+- Added alpha.4 ICMP jitter calculation scoped by session, protocol, target, host, address family, and probe stream.
+- Added SQLite schema version 2 with methodology metadata, speed validity fields, diagnostics, and reference-result storage.
 - Added Linux-compatible .NET tests for the initial core methodology.
 - Added Windows GitHub Actions build/test/publish workflow for the C# branch.
 - Added functional C# vertical slice for real ICMP/TCP/DNS/HTTPS probes, throughput estimates, monitoring coordinator, Quick Test runner, SQLite persistence, WPF live updates, session recovery marking, JSON export, and CI smoke evidence capture.
 - Added implemented C# WPF pages for Dashboard, History, Session Details, Reports, Settings, Activity Log, and About.
 - Added CSV export, standalone HTML report generation, persisted settings, manual markers, session deletion, UI command audit, and expanded smoke screenshot coverage.
+- Added measurement-correctness audit, scoped dashboard latency/jitter cards, status-aware speed display, local-time UI/export fields, diagnostic bundle export, and manual external reference-result comparison.
 
 ## In Progress
 
 - Hardening production probe behavior across varied Windows networks.
-- Storage migrations beyond schema version 1.
-- Windows runner validation of the full UI milestone.
+- Windows runner validation of the alpha.4 measurement-correctness milestone.
 
 ## Implemented But Unverified
 
 - WPF dashboard, History, Session Details, Reports, Settings, Activity Log, and About are wired to the view model and passed GitHub Windows runner smoke validation.
 - SQLite persistence stores/retrieves sessions, probe measurements, speed tests, and interface events in tests, but not yet tested under multi-day sessions.
 - Schedule logic is integrated into a running monitor and unit tested with fakes.
-- Built-in throughput estimate is implemented, but it is not an ISP-certified speed test.
+- Built-in throughput estimate is implemented with alpha.4 validity metadata, but it is not an ISP-certified speed test.
 
 ## Blocked
 
@@ -43,7 +43,7 @@ Version: `0.3.0-alpha.3`
 
 ## Not Started
 
-- Ookla CLI integration strategy.
+- Optional recognized speed-test engine integration strategy.
 - Stateful incident manager.
 - Python database migration compatibility.
 - Windows installer and signing pipeline.
@@ -56,5 +56,5 @@ Version: `0.3.0-alpha.3`
 - Current smoke SQLite evidence: 2 sessions, 37 measurements, 6 speed-test rows, 4 network-interface events, 0 manual markers, 0 incidents.
 - Current local Linux-compatible validation: `python3 -m ruff check .` passed; `python3 -m mypy src/dqopr_netpulse` passed; `python3 -m pytest -q` passed, 24 tests with 2 skipped; `git diff --check` passed.
 - Current local .NET validation: blocked on this Ubuntu machine because `dotnet` is not installed.
-- Real attended Windows desktop verification: not yet completed.
+- Real attended Windows desktop alpha.4 comparison verification: not yet completed.
 - Installer verification: not yet started.

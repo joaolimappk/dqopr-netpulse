@@ -22,7 +22,7 @@ Status: **Legacy prototype — not recommended for production evidence collectio
 
 ## Database Compatibility Plan
 
-The C# schema starts separately at schema version 1. Before C# replaces the Python alpha, the project must implement one of:
+The C# schema currently starts separately at schema version 2. Before C# replaces the Python alpha, the project must implement one of:
 
 - A read-only compatibility importer for Python SQLite sessions.
 - A backup-and-migrate command that copies Python databases before conversion.
@@ -40,5 +40,6 @@ The C# rewrite keeps session and measurement concepts but uses a new schema vers
 - `incidents`
 - `manual_markers`
 - `network_interface_events`
+- `reference_speed_results`
 
-The C# vertical slice stores probe methods as explicit enum names and keeps ICMP packet loss separate from TCP, DNS, HTTPS, and speed-test failures. Python databases are not migrated automatically yet.
+The C# vertical slice stores probe methods as explicit enum names, marks measurement methodology versions, stores speed-result validity metadata, and keeps ICMP packet loss separate from TCP, DNS, HTTPS, and speed-test failures. Python databases are not migrated automatically yet.

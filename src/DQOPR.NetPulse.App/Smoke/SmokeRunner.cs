@@ -21,8 +21,8 @@ public static class SmokeRunner
             TcpTargets: [new TargetDefinition("Cloudflare HTTPS", TargetPurpose.TcpConnect, "cloudflare.com", 443)],
             DnsHostname: "example.com",
             HttpsUri: new Uri("https://www.example.com/"),
-            DownloadUri: new Uri("https://speed.cloudflare.com/__down?bytes=300000"),
-            UploadUri: new Uri("https://httpbin.org/post"));
+            DownloadUri: new Uri("https://speed.cloudflare.com/__down?bytes=500000000"),
+            UploadUri: new Uri("https://speed.cloudflare.com/__up"));
 
         await window.ViewModel.StartMonitoringAsync(new MonitoringOptions
         {
@@ -38,7 +38,7 @@ public static class SmokeRunner
                 InterfaceSnapshot: TimeSpan.FromSeconds(5),
                 RouteSnapshot: TimeSpan.FromSeconds(5),
                 PublicIp: TimeSpan.FromSeconds(30),
-                SpeedTest: TimeSpan.FromSeconds(6))
+                SpeedTest: TimeSpan.FromSeconds(20))
         }).ConfigureAwait(true);
 
         await Task.Delay(TimeSpan.FromSeconds(Math.Min(6, options.DurationSeconds)), CancellationToken.None).ConfigureAwait(true);
@@ -53,9 +53,9 @@ public static class SmokeRunner
         await window.ViewModel.RunQuickTestAsync(
             new QuickTestOptions
             {
-                ProbeBurstCount = 10,
-                ProbeSpacing = TimeSpan.FromMilliseconds(100),
-                ProbeTimeout = TimeSpan.FromMilliseconds(250),
+                ProbeBurstCount = 20,
+                ProbeSpacing = TimeSpan.FromMilliseconds(250),
+                ProbeTimeout = TimeSpan.FromMilliseconds(750),
                 IncludeDownloadEstimate = true,
                 IncludeUploadEstimate = true
             },

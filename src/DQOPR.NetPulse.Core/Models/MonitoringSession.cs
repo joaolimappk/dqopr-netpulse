@@ -7,7 +7,8 @@ public sealed record MonitoringSession(
     string ProfileName,
     TimeSpan ActiveDuration,
     TimeSpan PausedDuration,
-    SessionStatus Status);
+    SessionStatus Status,
+    string MethodologyVersion = MeasurementMethodology.CurrentVersion);
 
 public enum SessionStatus
 {

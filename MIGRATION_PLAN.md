@@ -54,4 +54,4 @@ Solution: `DQOPR.NetPulse.sln`
 
 ## Current Milestone Scope
 
-This first milestone establishes the solution layout, version metadata, WPF shell, corrected methodology documentation, independent schedule calculations, ICMP-only packet-loss calculation, per-target/per-method jitter calculation, and initial SQLite schema bootstrap tests.
+This first milestone establishes the solution layout, version metadata, WPF shell, corrected methodology documentation, independent schedule calculations, ICMP-only packet-loss calculation, ICMP jitter scoped by session/target/host/address family/probe stream, and SQLite schema bootstrap tests.

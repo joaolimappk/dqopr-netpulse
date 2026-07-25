@@ -9,12 +9,12 @@ public sealed class ApplicationSettingsTests
     {
         var settings = ApplicationSettings.Defaults("", "")
             with
-            {
-                MonitoringDuration = TimeSpan.Zero,
-                IcmpTargets = "",
-                DnsHostname = "",
-                HttpsEndpoint = "http://example.com"
-            };
+        {
+            MonitoringDuration = TimeSpan.Zero,
+            IcmpTargets = "",
+            DnsHostname = "",
+            HttpsEndpoint = "http://example.com"
+        };
 
         var errors = settings.Validate();
 

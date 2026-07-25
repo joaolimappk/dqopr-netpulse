@@ -2,7 +2,7 @@
 
 Branch: `csharp-rewrite`
 
-Version: `0.3.0-alpha.3`
+Version: `0.3.0-alpha.4`
 
 Use this checklist on a real Windows 10 or Windows 11 desktop before proposing a merge to `main`.
 

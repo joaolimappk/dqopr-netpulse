@@ -8,4 +8,9 @@ public sealed record ProbeMeasurement(
     bool Succeeded,
     double? LatencyMilliseconds,
     string? FailureCategory = null,
-    string? FailureMessage = null);
+    string? FailureMessage = null,
+    string? TargetHost = null,
+    string? AddressFamily = null,
+    string? ProbeStreamId = null,
+    int? Sequence = null,
+    string MethodologyVersion = MeasurementMethodology.CurrentVersion);

@@ -35,17 +35,34 @@ Reports must never label DNS, TLS, HTTP, or speed-test failures as packet loss.
 
 ## Jitter
 
-Jitter is calculated per target and probe method using mean absolute difference between consecutive successful latency samples ordered by timestamp.
+Jitter is calculated only from successful ICMP RTT samples using mean absolute difference between consecutive samples ordered by timestamp.
 
-Gateway ICMP, external ICMP, TCP connect duration, DNS duration, and HTTPS duration are separate series. A one-sample series has no jitter value and should display as unavailable or waiting for samples.
+The series key is:
+
+- session
+- protocol
+- target name
+- target host
+- address family
+- probe stream
+
+Gateway ICMP, external ICMP targets, address families, TCP connect duration, DNS duration, and HTTPS duration are separate series. DNS, TCP, and HTTPS are never jitter inputs. A series with fewer than 3 successful ICMP samples has no jitter value and should display as insufficient samples.
 
 ## Quick Test
 
 Quick Test is a snapshot and may miss intermittent problems.
 
-It must use a configurable burst of 10 to 20 probes per selected latency target, with a reasonable delay between probes. The current default is 12 probes spaced 250 milliseconds apart.
+It must use at least 20 probes per selected latency target, with a reasonable delay between probes. The current default is 20 probes spaced 250 milliseconds apart.
 
 Quick Test should include latency, packet loss, jitter, DNS, HTTPS, download estimate, upload estimate, analysis, and persistence. Speed testing must be clearly labeled as full speed test, built-in throughput estimate, or unavailable.
+
+The expected Quick Test stage order is: detecting network, testing router, testing internet latency, testing TCP, testing DNS, testing HTTPS, warming up download, measuring download, warming up upload, measuring upload, calculating statistics, and saving results. A complete built-in throughput Quick Test may take roughly 25 to 40 seconds.
+
+## Throughput Validity
+
+Built-in speed rows must include provider, endpoint, actual bytes, active/setup/transfer/warmup durations, stream count, HTTP version, status, methodology version, and safe failure details.
+
+Only `Valid` and `Degraded` rows from the current methodology may be displayed as numeric dashboard/history speeds. Invalid, insufficient-duration, canceled, endpoint-limited, unavailable, and legacy rows remain visible as evidence but are not aggregated into valid speed summaries.
 
 ## Fault-Domain Language
 

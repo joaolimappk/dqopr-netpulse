@@ -88,17 +88,21 @@
                         </Grid>
 
                         <UniformGrid Grid.Row="1" Margin="0,20,0,0" Columns="4" Rows="3">
-                            <GroupBox Header="Latency" Margin="0,0,12,12">
-                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="{Binding Latency}" />
+                            <GroupBox Header="Router latency" Margin="0,0,12,12"
+                                      ToolTip="Median ICMP round-trip time to the detected default gateway for the current probe stream.">
+                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="{Binding RouterLatency}" />
                             </GroupBox>
-                            <GroupBox Header="Jitter" Margin="0,0,12,12">
-                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="{Binding Jitter}" />
+                            <GroupBox Header="Internet latency" Margin="0,0,12,12"
+                                      ToolTip="Median ICMP round-trip time to the selected internet target. DNS, TCP, and HTTPS timings are not included.">
+                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="{Binding InternetLatency}" TextWrapping="Wrap" TextAlignment="Center" />
                             </GroupBox>
-                            <GroupBox Header="ICMP packet loss" Margin="0,0,12,12">
-                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="{Binding PacketLoss}" />
+                            <GroupBox Header="Internet jitter" Margin="0,0,12,12"
+                                      ToolTip="Mean absolute difference between consecutive successful ICMP RTT samples from the same session, target, address family, and probe stream. Requires at least 3 successful samples.">
+                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="{Binding InternetJitter}" TextWrapping="Wrap" TextAlignment="Center" />
                             </GroupBox>
-                            <GroupBox Header="Internet target" Margin="0,0,0,12">
-                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="{Binding InternetHealth}" />
+                            <GroupBox Header="ICMP packet loss" Margin="0,0,0,12"
+                                      ToolTip="Packet-loss percentage for the same internet ICMP target shown in the latency card. DNS, TCP, HTTPS, and throughput failures are separate.">
+                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="{Binding PacketLoss}" TextWrapping="Wrap" TextAlignment="Center" />
                             </GroupBox>
                             <GroupBox Header="Current interface" Margin="0,0,12,12">
                                 <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="16" FontWeight="SemiBold" Text="{Binding CurrentInterface}" TextWrapping="Wrap" />
@@ -178,8 +182,8 @@
                             </ContextMenu>
                         </DataGrid.ContextMenu>
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Start" Binding="{Binding Start}" Width="150" />
-                            <DataGridTextColumn Header="End" Binding="{Binding End}" Width="150" />
+                            <DataGridTextColumn Header="Start (local)" Binding="{Binding Start}" Width="165" />
+                            <DataGridTextColumn Header="End (local)" Binding="{Binding End}" Width="165" />
                             <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" Width="95" />
                             <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="95" />
                             <DataGridTextColumn Header="Interface" Binding="{Binding Interface}" Width="140" />
@@ -190,6 +194,7 @@
                             <DataGridTextColumn Header="Maximum latency" Binding="{Binding MaximumLatency}" Width="115" />
                             <DataGridTextColumn Header="Download" Binding="{Binding Download}" Width="100" />
                             <DataGridTextColumn Header="Upload" Binding="{Binding Upload}" Width="100" />
+                            <DataGridTextColumn Header="Methodology" Binding="{Binding Methodology}" Width="120" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </DockPanel>
@@ -202,7 +207,7 @@
                             <UniformGrid Columns="4" Margin="8">
                                 <TextBlock Text="{Binding SelectedSession.Id, StringFormat=Session: {0}}" />
                                 <TextBlock Text="{Binding SelectedSession.Status, StringFormat=Status: {0}}" />
-                                <TextBlock Text="{Binding SelectedSession.Start, StringFormat=Start: {0}}" />
+                                <TextBlock Text="{Binding SelectedSession.Start, StringFormat=Start local: {0}}" />
                                 <TextBlock Text="{Binding SelectedSession.Duration, StringFormat=Duration: {0}}" />
                             </UniformGrid>
                         </GroupBox>
@@ -234,9 +239,12 @@
                             <TabItem Header="Timeline">
                                 <DataGrid ItemsSource="{Binding DetailConnectivityMeasurements}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MinHeight="220">
                                     <DataGrid.Columns>
-                                        <DataGridTextColumn Header="Time" Binding="{Binding ObservedAt}" Width="160" />
+                                        <DataGridTextColumn Header="Time (local)" Binding="{Binding ObservedAt.LocalDateTime}" Width="160" />
                                         <DataGridTextColumn Header="Method" Binding="{Binding Method}" Width="100" />
                                         <DataGridTextColumn Header="Target" Binding="{Binding TargetName}" Width="170" />
+                                        <DataGridTextColumn Header="Host" Binding="{Binding TargetHost}" Width="140" />
+                                        <DataGridTextColumn Header="Family" Binding="{Binding AddressFamily}" Width="80" />
+                                        <DataGridTextColumn Header="Seq" Binding="{Binding Sequence}" Width="55" />
                                         <DataGridTextColumn Header="Result" Binding="{Binding Succeeded}" Width="90" />
                                         <DataGridTextColumn Header="Latency ms" Binding="{Binding LatencyMilliseconds}" Width="95" />
                                         <DataGridTextColumn Header="Failure" Binding="{Binding FailureCategory}" Width="130" />
@@ -258,10 +266,12 @@
                             <TabItem Header="DNS / TCP / HTTPS">
                                 <DataGrid ItemsSource="{Binding DetailMeasurements}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MinHeight="220">
                                     <DataGrid.Columns>
-                                        <DataGridTextColumn Header="Time" Binding="{Binding ObservedAt}" Width="160" />
+                                        <DataGridTextColumn Header="Time (local)" Binding="{Binding ObservedAt.LocalDateTime}" Width="160" />
                                         <DataGridTextColumn Header="Method" Binding="{Binding Method}" Width="110" />
                                         <DataGridTextColumn Header="Target" Binding="{Binding TargetName}" Width="180" />
+                                        <DataGridTextColumn Header="Host" Binding="{Binding TargetHost}" Width="140" />
                                         <DataGridTextColumn Header="Succeeded" Binding="{Binding Succeeded}" Width="90" />
+                                        <DataGridTextColumn Header="Duration ms" Binding="{Binding LatencyMilliseconds}" Width="95" />
                                         <DataGridTextColumn Header="Failure" Binding="{Binding FailureCategory}" Width="130" />
                                         <DataGridTextColumn Header="Message" Binding="{Binding FailureMessage}" Width="*" />
                                     </DataGrid.Columns>
@@ -270,12 +280,18 @@
                             <TabItem Header="Speed tests">
                                 <DataGrid ItemsSource="{Binding DetailSpeedTests}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MinHeight="220">
                                     <DataGrid.Columns>
-                                        <DataGridTextColumn Header="Time" Binding="{Binding ObservedAt}" Width="160" />
+                                        <DataGridTextColumn Header="Time (local)" Binding="{Binding ObservedAt.LocalDateTime}" Width="160" />
                                         <DataGridTextColumn Header="Direction" Binding="{Binding Direction}" Width="100" />
-                                        <DataGridTextColumn Header="Succeeded" Binding="{Binding Succeeded}" Width="90" />
+                                        <DataGridTextColumn Header="Status" Binding="{Binding ResultStatus}" Width="145" />
                                         <DataGridTextColumn Header="Mbps" Binding="{Binding MegabitsPerSecond}" Width="100" />
                                         <DataGridTextColumn Header="Bytes" Binding="{Binding BytesTransferred}" Width="120" />
+                                        <DataGridTextColumn Header="Transfer ms" Binding="{Binding TransferDuration.TotalMilliseconds}" Width="100" />
+                                        <DataGridTextColumn Header="Warmup ms" Binding="{Binding WarmupDuration.TotalMilliseconds}" Width="95" />
+                                        <DataGridTextColumn Header="Streams" Binding="{Binding ParallelStreamCount}" Width="75" />
+                                        <DataGridTextColumn Header="HTTP" Binding="{Binding HttpVersion}" Width="70" />
                                         <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="140" />
+                                        <DataGridTextColumn Header="Endpoint" Binding="{Binding Endpoint}" Width="210" />
+                                        <DataGridTextColumn Header="Methodology" Binding="{Binding MethodologyVersion}" Width="110" />
                                         <DataGridTextColumn Header="Failure" Binding="{Binding FailureCategory}" Width="*" />
                                     </DataGrid.Columns>
                                 </DataGrid>
@@ -288,7 +304,7 @@
                                     </Grid.RowDefinitions>
                                     <DataGrid ItemsSource="{Binding DetailNetworkEvents}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MinHeight="150">
                                         <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Time" Binding="{Binding ObservedAt}" Width="160" />
+                                            <DataGridTextColumn Header="Time (local)" Binding="{Binding ObservedAt.LocalDateTime}" Width="160" />
                                             <DataGridTextColumn Header="Event" Binding="{Binding EventType}" Width="120" />
                                             <DataGridTextColumn Header="Interface" Binding="{Binding InterfaceName}" Width="180" />
                                             <DataGridTextColumn Header="Gateway" Binding="{Binding Gateway}" Width="150" />
@@ -297,7 +313,7 @@
                                     </DataGrid>
                                     <DataGrid Grid.Row="1" Margin="0,10,0,0" ItemsSource="{Binding DetailMarkers}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MinHeight="120">
                                         <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Time" Binding="{Binding ObservedAt}" Width="170" />
+                                            <DataGridTextColumn Header="Time (local)" Binding="{Binding ObservedAt.LocalDateTime}" Width="170" />
                                             <DataGridTextColumn Header="Note" Binding="{Binding Note}" Width="*" />
                                         </DataGrid.Columns>
                                     </DataGrid>
@@ -332,6 +348,38 @@
                     <GroupBox Header="Report contents" Margin="0,16,0,0">
                         <TextBlock Margin="8" TextWrapping="Wrap"
                                    Text="HTML reports include the session summary, methodology, timing, interface and gateway, latency and jitter statistics, ICMP-only packet loss, DNS/TCP/HTTPS results, speed estimates, user markers, events, charts, and the throughput disclaimer." />
+                    </GroupBox>
+                    <GroupBox Header="External reference result" Margin="0,16,0,0">
+                        <Grid Margin="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <UniformGrid Columns="4">
+                                <StackPanel Margin="0,0,8,8">
+                                    <TextBlock Text="Provider" />
+                                    <TextBox Text="{Binding ReferenceProvider, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,8,8">
+                                    <TextBlock Text="Download Mbps" />
+                                    <TextBox Text="{Binding ReferenceDownload, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,8,8">
+                                    <TextBlock Text="Upload Mbps" />
+                                    <TextBox Text="{Binding ReferenceUpload, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,0,8">
+                                    <TextBlock Text="Latency ms" />
+                                    <TextBox Text="{Binding ReferenceLatency, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                            </UniformGrid>
+                            <TextBox Grid.Row="1" MinHeight="54" TextWrapping="Wrap" AcceptsReturn="True" Text="{Binding ReferenceNotes, UpdateSourceTrigger=PropertyChanged}" />
+                            <DockPanel Grid.Row="2" Margin="0,8,0,0">
+                                <Button DockPanel.Dock="Left" Width="170" Height="32" Command="{Binding SaveReferenceResultCommand}" Content="Save Reference Result" />
+                                <TextBlock Margin="12,6,0,0" Text="{Binding ReferenceFeedback}" TextWrapping="Wrap" />
+                            </DockPanel>
+                        </Grid>
                     </GroupBox>
                     <TextBlock Margin="0,12,0,0" FontWeight="SemiBold" Text="{Binding Feedback}" TextWrapping="Wrap" />
                 </StackPanel>
