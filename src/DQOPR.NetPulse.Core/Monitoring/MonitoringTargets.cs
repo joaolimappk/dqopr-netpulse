@@ -24,6 +24,6 @@ public sealed record MonitoringTargets(
         ],
         DnsHostname: "example.com",
         HttpsUri: new Uri("https://www.example.com/"),
-        DownloadUri: new Uri("https://speed.cloudflare.com/__down?bytes=25000000"),
+        DownloadUri: new Uri("https://cachefly.cachefly.net/100mb.test"),
         UploadUri: new Uri("https://speed.cloudflare.com/__up"));
 }

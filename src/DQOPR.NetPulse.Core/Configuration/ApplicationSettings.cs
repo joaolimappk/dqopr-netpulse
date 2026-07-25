@@ -26,7 +26,7 @@ public sealed record ApplicationSettings
 
     public string HttpsEndpoint { get; set; } = "https://www.example.com/";
 
-    public string DownloadEndpoint { get; set; } = "https://speed.cloudflare.com/__down?bytes=25000000";
+    public string DownloadEndpoint { get; set; } = "https://cachefly.cachefly.net/100mb.test";
 
     public string UploadEndpoint { get; set; } = "https://speed.cloudflare.com/__up";
 

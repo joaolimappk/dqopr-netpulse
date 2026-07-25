@@ -19,6 +19,7 @@ public sealed class NetworkProbeService(HttpClient? httpClient = null) : INetwor
     private const int ParallelStreamCount = 4;
     private const int DownloadBufferSize = 128 * 1024;
     private const int UploadPayloadBytes = 4 * 1024 * 1024;
+    private const string UserAgent = "DQOPR-NetPulse/0.3 throughput-estimate";
     private readonly HttpClient httpClient = httpClient ?? new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
     private readonly bool ownsHttpClient = httpClient is null;
 
@@ -158,15 +159,17 @@ public sealed class NetworkProbeService(HttpClient? httpClient = null) : INetwor
             var streams = await Task.WhenAll(Enumerable.Range(0, ParallelStreamCount)
                 .Select(index => DownloadStreamAsync(uri, measurementDuration, index + 1, timeoutSource.Token))).ConfigureAwait(false);
 
+            var usable = streams.Where(stream => stream.BytesTransferred > 0 && stream.TransferDuration > TimeSpan.Zero).ToArray();
             var failed = streams.Where(stream => !stream.Succeeded).ToArray();
-            if (failed.Length == streams.Length)
+            if (usable.Length == 0)
             {
-                return FailedSpeed(sessionId, observedAt, "download", budget, uri, SpeedResultStatus.InvalidResult, failed[0].FailureCategory ?? "AllStreamsFailed", failed[0].FailureMessage ?? "Every download stream failed.", warmup, streams);
+                var firstFailure = failed.FirstOrDefault();
+                return FailedSpeed(sessionId, observedAt, "download", budget, uri, SpeedResultStatus.InvalidResult, firstFailure?.FailureCategory ?? "NoBytes", firstFailure?.FailureMessage ?? "Download endpoint produced no measurable bytes.", warmup, streams);
             }
 
-            var bytes = streams.Where(stream => stream.Succeeded).Sum(stream => stream.BytesTransferred);
-            var transferDuration = streams.Where(stream => stream.Succeeded).Max(stream => stream.TransferDuration);
-            var setupDuration = TimeSpan.FromMilliseconds(streams.Where(stream => stream.Succeeded).Average(stream => stream.SetupDuration.TotalMilliseconds));
+            var bytes = usable.Sum(stream => stream.BytesTransferred);
+            var transferDuration = usable.Max(stream => stream.TransferDuration);
+            var setupDuration = TimeSpan.FromMilliseconds(usable.Average(stream => stream.SetupDuration.TotalMilliseconds));
             var status = ThroughputCalculator.Classify(anySucceeded: true, anyFailed: failed.Length > 0, transferDuration, MinimumMeasurementDuration);
             return SpeedResult(sessionId, observedAt, "download", status == SpeedResultStatus.Valid || status == SpeedResultStatus.Degraded, bytes, setupDuration, transferDuration, WarmupDuration, uri, status, null, null, streams);
         }
@@ -194,15 +197,17 @@ public sealed class NetworkProbeService(HttpClient? httpClient = null) : INetwor
             var streams = await Task.WhenAll(Enumerable.Range(0, ParallelStreamCount)
                 .Select(index => UploadStreamAsync(uri, payload, measurementDuration, index + 1, timeoutSource.Token))).ConfigureAwait(false);
 
+            var usable = streams.Where(stream => stream.BytesTransferred > 0 && stream.TransferDuration > TimeSpan.Zero).ToArray();
             var failed = streams.Where(stream => !stream.Succeeded).ToArray();
-            if (failed.Length == streams.Length)
+            if (usable.Length == 0)
             {
-                return FailedSpeed(sessionId, observedAt, "upload", budget, uri, SpeedResultStatus.UploadEndpointUnavailable, failed[0].FailureCategory ?? "AllStreamsFailed", failed[0].FailureMessage ?? "Every upload stream failed.", warmup, streams);
+                var firstFailure = failed.FirstOrDefault();
+                return FailedSpeed(sessionId, observedAt, "upload", budget, uri, SpeedResultStatus.UploadEndpointUnavailable, firstFailure?.FailureCategory ?? "NoBytes", firstFailure?.FailureMessage ?? "Upload endpoint produced no measurable bytes.", warmup, streams);
             }
 
-            var bytes = streams.Where(stream => stream.Succeeded).Sum(stream => stream.BytesTransferred);
-            var transferDuration = streams.Where(stream => stream.Succeeded).Max(stream => stream.TransferDuration);
-            var setupDuration = TimeSpan.FromMilliseconds(streams.Where(stream => stream.Succeeded).Average(stream => stream.SetupDuration.TotalMilliseconds));
+            var bytes = usable.Sum(stream => stream.BytesTransferred);
+            var transferDuration = usable.Max(stream => stream.TransferDuration);
+            var setupDuration = TimeSpan.FromMilliseconds(usable.Average(stream => stream.SetupDuration.TotalMilliseconds));
             var status = ThroughputCalculator.Classify(anySucceeded: true, anyFailed: failed.Length > 0, transferDuration, MinimumMeasurementDuration, uploadEndpointUnavailable: true);
             return SpeedResult(sessionId, observedAt, "upload", status == SpeedResultStatus.Valid || status == SpeedResultStatus.Degraded, bytes, setupDuration, transferDuration, WarmupDuration, uri, status, null, null, streams);
         }
@@ -235,13 +240,14 @@ public sealed class NetworkProbeService(HttpClient? httpClient = null) : INetwor
                 request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
                 request.Headers.AcceptEncoding.Clear();
                 request.Headers.TryAddWithoutValidation("Accept-Encoding", "identity");
+                request.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
                 using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
                 setup.Stop();
                 setupDuration += setup.Elapsed;
                 httpVersion = response.Version.ToString();
                 if (!response.IsSuccessStatusCode)
                 {
-                    return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, setupDuration, $"HTTP {(int)response.StatusCode}", response.ReasonPhrase ?? "Download endpoint returned an invalid status.", httpVersion);
+                    return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setupDuration, transferDuration, $"HTTP {(int)response.StatusCode}", response.ReasonPhrase ?? "Download endpoint returned an invalid status.", httpVersion);
                 }
 
                 await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
@@ -266,7 +272,7 @@ public sealed class NetworkProbeService(HttpClient? httpClient = null) : INetwor
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException)
         {
-            return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, setupDuration, ex.GetType().Name, ex.Message, httpVersion);
+            return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setupDuration, transferDuration, ex.GetType().Name, ex.Message, httpVersion);
         }
     }
 
@@ -284,6 +290,7 @@ public sealed class NetworkProbeService(HttpClient? httpClient = null) : INetwor
                 var setupWatch = Stopwatch.StartNew();
                 using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher };
                 request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+                request.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
                 request.Content = new ByteArrayContent(payload);
                 request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
                 using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
@@ -291,7 +298,8 @@ public sealed class NetworkProbeService(HttpClient? httpClient = null) : INetwor
                 setup += setupWatch.Elapsed;
                 if (!response.IsSuccessStatusCode)
                 {
-                    return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, setup, $"HTTP {(int)response.StatusCode}", response.ReasonPhrase ?? "Upload endpoint rejected the payload.", response.Version.ToString());
+                    transfer.Stop();
+                    return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup, transfer.Elapsed, $"HTTP {(int)response.StatusCode}", response.ReasonPhrase ?? "Upload endpoint rejected the payload.", response.Version.ToString());
                 }
 
                 bytes += payload.LongLength;
@@ -303,7 +311,7 @@ public sealed class NetworkProbeService(HttpClient? httpClient = null) : INetwor
         catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException)
         {
             transfer.Stop();
-            return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, setup, ex.GetType().Name, ex.Message, null);
+            return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup, transfer.Elapsed, ex.GetType().Name, ex.Message, null);
         }
     }
 
@@ -396,7 +404,7 @@ public sealed class NetworkProbeService(HttpClient? httpClient = null) : INetwor
         public static ThroughputStreamResult Success(int streamIndex, DateTimeOffset startedAt, DateTimeOffset endedAt, long bytesTransferred, TimeSpan setupDuration, TimeSpan transferDuration, string? httpVersion)
             => new(streamIndex, startedAt, endedAt, true, bytesTransferred, setupDuration, transferDuration, httpVersion, null, null);
 
-        public static ThroughputStreamResult Failed(int streamIndex, DateTimeOffset startedAt, DateTimeOffset endedAt, TimeSpan setupDuration, string failureCategory, string failureMessage, string? httpVersion)
-            => new(streamIndex, startedAt, endedAt, false, 0, setupDuration, TimeSpan.Zero, httpVersion, failureCategory, failureMessage);
+        public static ThroughputStreamResult Failed(int streamIndex, DateTimeOffset startedAt, DateTimeOffset endedAt, long bytesTransferred, TimeSpan setupDuration, TimeSpan transferDuration, string failureCategory, string failureMessage, string? httpVersion)
+            => new(streamIndex, startedAt, endedAt, false, bytesTransferred, setupDuration, transferDuration, httpVersion, failureCategory, failureMessage);
     }
 }

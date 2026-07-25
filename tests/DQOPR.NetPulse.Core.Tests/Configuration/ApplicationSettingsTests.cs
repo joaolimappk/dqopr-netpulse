@@ -27,6 +27,15 @@ public sealed class ApplicationSettingsTests
     }
 
     [Fact]
+    public void DefaultsUseNonRateLimitedDownloadEndpoint()
+    {
+        var settings = ApplicationSettings.Defaults("netpulse.sqlite3", "exports");
+
+        Assert.Equal("https://cachefly.cachefly.net/100mb.test", settings.DownloadEndpoint);
+        Assert.DoesNotContain("speed.cloudflare.com/__down", settings.DownloadEndpoint, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task StorePersistsEditableSettings()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"netpulse-settings-{Guid.NewGuid():N}");
