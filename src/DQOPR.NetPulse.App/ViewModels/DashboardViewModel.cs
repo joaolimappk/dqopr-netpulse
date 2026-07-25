@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Windows;
@@ -588,14 +589,14 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
 
     private Task CopyDiagnosticsAsync()
     {
-        Clipboard.SetText($"DQOPR NetPulse {Version}{Environment.NewLine}{RuntimeInfo}{Environment.NewLine}Database: {settings.DatabasePath}");
+        System.Windows.Clipboard.SetText($"DQOPR NetPulse {Version}{Environment.NewLine}{RuntimeInfo}{Environment.NewLine}Database: {settings.DatabasePath}");
         Feedback = "Diagnostic information copied.";
         return Task.CompletedTask;
     }
 
     private Task CopyAllActivityAsync()
     {
-        Clipboard.SetText(string.Join(Environment.NewLine, ActivityLog.Select(item => $"{item.Timestamp:O} {item.Message}")));
+        System.Windows.Clipboard.SetText(string.Join(Environment.NewLine, ActivityLog.Select(item => $"{item.Timestamp:O} {item.Message}")));
         Feedback = "Activity log copied.";
         return Task.CompletedTask;
     }
