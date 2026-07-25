@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DQOPR.NetPulse.Core\DQOPR.NetPulse.Core.csproj" />
+    <ProjectReference Include="..\DQOPR.NetPulse.Diagnostics\DQOPR.NetPulse.Diagnostics.csproj" />
     <ProjectReference Include="..\DQOPR.NetPulse.Storage\DQOPR.NetPulse.Storage.csproj" />
   </ItemGroup>
 
