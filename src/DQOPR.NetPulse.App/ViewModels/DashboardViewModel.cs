@@ -739,25 +739,25 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         var latency = sessionMeasurements.Where(item => item is { Succeeded: true, LatencyMilliseconds: not null }).TakeLast(80).ToArray();
         for (var index = 0; index < latency.Length; index++)
         {
-            LatencyChartPoints.Add(new Point(index * 6, 120 - Math.Min(115, latency[index].LatencyMilliseconds!.Value)));
+            LatencyChartPoints.Add(new System.Windows.Point(index * 6, 120 - Math.Min(115, latency[index].LatencyMilliseconds!.Value)));
         }
 
         var jitterValues = JitterCalculator.MeanAbsoluteDifferenceBySeries(sessionMeasurements).Values.Where(value => !double.IsNaN(value)).Take(80).ToArray();
         for (var index = 0; index < jitterValues.Length; index++)
         {
-            JitterChartPoints.Add(new Point(index * 6, 120 - Math.Min(115, jitterValues[index])));
+            JitterChartPoints.Add(new System.Windows.Point(index * 6, 120 - Math.Min(115, jitterValues[index])));
         }
 
         var lossValues = PacketLossSummary.ByIcmpTarget(sessionMeasurements).ToArray();
         for (var index = 0; index < lossValues.Length; index++)
         {
-            PacketLossChartPoints.Add(new Point(index * 40, 120 - Math.Min(115, lossValues[index].LossPercent)));
+            PacketLossChartPoints.Add(new System.Windows.Point(index * 40, 120 - Math.Min(115, lossValues[index].LossPercent)));
         }
 
         var speeds = sessionSpeeds.Where(item => item.Succeeded && item.MegabitsPerSecond is not null).TakeLast(80).ToArray();
         for (var index = 0; index < speeds.Length; index++)
         {
-            SpeedChartPoints.Add(new Point(index * 12, 120 - Math.Min(115, speeds[index].MegabitsPerSecond!.Value)));
+            SpeedChartPoints.Add(new System.Windows.Point(index * 12, 120 - Math.Min(115, speeds[index].MegabitsPerSecond!.Value)));
         }
     }
 
