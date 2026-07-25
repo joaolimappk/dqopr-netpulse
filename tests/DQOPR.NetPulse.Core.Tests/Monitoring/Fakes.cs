@@ -38,6 +38,10 @@ internal sealed class FakeStore : INetPulseStore
 
     public List<SpeedTestMeasurement> SpeedTests { get; } = [];
 
+    public List<NetworkInterfaceEvent> NetworkInterfaceEvents { get; } = [];
+
+    public List<ManualMarker> ManualMarkers { get; } = [];
+
     public Task InitializeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task CreateSessionAsync(MonitoringSession session, CancellationToken cancellationToken)
@@ -69,13 +73,39 @@ internal sealed class FakeStore : INetPulseStore
         return Task.CompletedTask;
     }
 
-    public Task SaveNetworkInterfaceEventAsync(NetworkInterfaceEvent networkEvent, CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task SaveNetworkInterfaceEventAsync(NetworkInterfaceEvent networkEvent, CancellationToken cancellationToken)
+    {
+        NetworkInterfaceEvents.Add(networkEvent);
+        return Task.CompletedTask;
+    }
+
+    public Task SaveManualMarkerAsync(ManualMarker marker, CancellationToken cancellationToken)
+    {
+        ManualMarkers.Add(marker);
+        return Task.CompletedTask;
+    }
 
     public Task<IReadOnlyList<ProbeMeasurement>> GetMeasurementsAsync(Guid sessionId, CancellationToken cancellationToken)
         => Task.FromResult<IReadOnlyList<ProbeMeasurement>>(Measurements.Where(measurement => measurement.SessionId == sessionId).ToArray());
 
     public Task<IReadOnlyList<SpeedTestMeasurement>> GetSpeedTestsAsync(Guid sessionId, CancellationToken cancellationToken)
         => Task.FromResult<IReadOnlyList<SpeedTestMeasurement>>(SpeedTests.Where(speed => speed.SessionId == sessionId).ToArray());
+
+    public Task<IReadOnlyList<NetworkInterfaceEvent>> GetNetworkInterfaceEventsAsync(Guid sessionId, CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<NetworkInterfaceEvent>>(NetworkInterfaceEvents.Where(networkEvent => networkEvent.SessionId == sessionId).ToArray());
+
+    public Task<IReadOnlyList<ManualMarker>> GetManualMarkersAsync(Guid sessionId, CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<ManualMarker>>(ManualMarkers.Where(marker => marker.SessionId == sessionId).ToArray());
+
+    public Task DeleteSessionAsync(Guid sessionId, CancellationToken cancellationToken)
+    {
+        Sessions.RemoveAll(session => session.Id == sessionId);
+        Measurements.RemoveAll(measurement => measurement.SessionId == sessionId);
+        SpeedTests.RemoveAll(speed => speed.SessionId == sessionId);
+        NetworkInterfaceEvents.RemoveAll(networkEvent => networkEvent.SessionId == sessionId);
+        ManualMarkers.RemoveAll(marker => marker.SessionId == sessionId);
+        return Task.CompletedTask;
+    }
 }
 
 internal sealed class FakeProbeService : INetworkProbeService

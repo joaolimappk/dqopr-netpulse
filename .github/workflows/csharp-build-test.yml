@@ -75,10 +75,25 @@ jobs:
             throw "WPF smoke test exited with code $($process.ExitCode)"
           }
 
-          foreach ($required in @("active-monitoring.png", "quick-test-complete.png", "netpulse-smoke.sqlite3", "measurements-export.json", "smoke_metadata.json")) {
+          foreach ($required in @("active-monitoring.png", "dashboard.png", "quick-test-complete.png", "history.png", "session-details.png", "reports.png", "settings.png", "activity-log.png", "about.png", "netpulse-smoke.sqlite3", "measurements-export.json", "smoke_metadata.json")) {
             $path = Join-Path $evidence $required
             if (-not (Test-Path $path)) {
               throw "Smoke evidence missing: $required"
+            }
+            if ((Get-Item $path).Length -le 0) {
+              throw "Smoke evidence is empty: $required"
+            }
+          }
+
+          foreach ($pattern in @("netpulse-*.csv", "netpulse-*.json", "netpulse-*.html")) {
+            $matches = Get-ChildItem -Path $evidence -Filter $pattern
+            if (-not $matches) {
+              throw "Smoke export missing: $pattern"
+            }
+            foreach ($file in $matches) {
+              if ($file.Length -le 0) {
+                throw "Smoke export is empty: $($file.Name)"
+              }
             }
           }
 

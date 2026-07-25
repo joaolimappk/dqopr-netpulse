@@ -20,7 +20,15 @@ public interface INetPulseStore
 
     Task SaveNetworkInterfaceEventAsync(NetworkInterfaceEvent networkEvent, CancellationToken cancellationToken);
 
+    Task SaveManualMarkerAsync(ManualMarker marker, CancellationToken cancellationToken);
+
     Task<IReadOnlyList<ProbeMeasurement>> GetMeasurementsAsync(Guid sessionId, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<SpeedTestMeasurement>> GetSpeedTestsAsync(Guid sessionId, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<NetworkInterfaceEvent>> GetNetworkInterfaceEventsAsync(Guid sessionId, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<ManualMarker>> GetManualMarkersAsync(Guid sessionId, CancellationToken cancellationToken);
+
+    Task DeleteSessionAsync(Guid sessionId, CancellationToken cancellationToken);
 }

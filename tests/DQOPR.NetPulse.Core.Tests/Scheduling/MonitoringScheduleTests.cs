@@ -13,6 +13,7 @@ public sealed class MonitoringScheduleTests
 
         var speedTest = Assert.Single(schedule.Operations, operation => operation.Name == "speed-test");
         Assert.Equal(TimeSpan.FromMinutes(5), speedTest.Interval);
+        Assert.Equal(start, speedTest.NextRunAt);
         Assert.Contains(schedule.Operations, operation => operation.Name == "icmp" && operation.Interval == TimeSpan.FromSeconds(2));
     }
 }

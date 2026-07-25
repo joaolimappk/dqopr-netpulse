@@ -21,3 +21,8 @@ public sealed class SessionEventArgs(MonitoringSession session) : EventArgs
 {
     public MonitoringSession Session { get; } = session;
 }
+
+public sealed class NetworkInterfaceEventArgs(NetworkInterfaceEvent networkEvent) : EventArgs
+{
+    public NetworkInterfaceEvent NetworkEvent { get; } = networkEvent;
+}

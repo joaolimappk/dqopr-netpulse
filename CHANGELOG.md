@@ -8,6 +8,13 @@ The format is based on Keep a Changelog, and this project uses semantic versioni
 
 ### Added
 
+- C# WPF milestone `0.3.0-alpha.3` with implemented Dashboard, History, Session Details, Reports, Settings, Activity Log, and About pages.
+- UI functionality audit documenting visible tabs, menus, dashboard controls, context actions, export/report commands, settings controls, keyboard shortcuts, and tray status.
+- Persistent C# application settings with validation for monitoring duration, probe intervals, timeout, targets, database path, export directory, and behavior flags.
+- CSV session export and standalone HTML report generation for the C# rewrite.
+- Manual issue markers and stored network-interface event retrieval in the C# SQLite repository.
+- Expanded Windows smoke evidence capture for all implemented C# tabs plus CSV/JSON/HTML exports.
+- Manual Windows test checklist for the C# branch.
 - Initial open-source project documentation.
 - Apache License 2.0.
 - Windows packaging and signing documentation.
@@ -15,6 +22,12 @@ The format is based on Keep a Changelog, and this project uses semantic versioni
 - GitHub issue and pull request templates.
 - Windows build and validation workflow.
 - Release validation script for tests, release metadata, secret scans, checksums, optional executable and installer builds, and signature verification.
+
+### Fixed
+
+- C# scheduled speed-test estimates now run at session start and then on the configured interval, matching a 10-minute run with a 5-minute interval as two attempts.
+- C# Quick Test now updates dashboard download/upload estimates and active interface/gateway fields.
+- Removed blank placeholder tabs and dead top-level menu shells from the C# WPF app.
 
 ## [0.2.2] - 2026-07-25
 

@@ -32,6 +32,8 @@ public sealed class MonitoringCoordinator(
 
     public event EventHandler<SessionEventArgs>? SessionChanged;
 
+    public event EventHandler<NetworkInterfaceEventArgs>? NetworkInterfaceEventRecorded;
+
     public MonitoringSession? CurrentSession => session;
 
     public async Task<MonitoringSession> StartAsync(MonitoringOptions options, CancellationToken cancellationToken)
@@ -203,7 +205,7 @@ public sealed class MonitoringCoordinator(
             new ScheduledOperation("dns", intervals.Dns, TimeSpan.FromSeconds(5), startAt),
             new ScheduledOperation("https", intervals.Https, TimeSpan.FromSeconds(10), startAt),
             new ScheduledOperation("route", intervals.RouteSnapshot, TimeSpan.FromSeconds(5), startAt),
-            new ScheduledOperation("speed-test", intervals.SpeedTest, TimeSpan.FromMinutes(2), startAt)
+            new ScheduledOperation("speed-test", intervals.SpeedTest, TimeSpan.Zero, startAt)
         ]);
     }
 
@@ -257,9 +259,9 @@ public sealed class MonitoringCoordinator(
         gatewayTarget = string.IsNullOrWhiteSpace(snapshot.Gateway)
             ? null
             : new TargetDefinition("Local Gateway", TargetPurpose.LocalGateway, snapshot.Gateway);
-        await store.SaveNetworkInterfaceEventAsync(
-            new NetworkInterfaceEvent(sessionId, snapshot.ObservedAt, "snapshot", snapshot.InterfaceName, snapshot.Gateway, snapshot.Description),
-            cancellationToken).ConfigureAwait(false);
+        var networkEvent = new NetworkInterfaceEvent(sessionId, snapshot.ObservedAt, "snapshot", snapshot.InterfaceName, snapshot.Gateway, snapshot.Description);
+        await store.SaveNetworkInterfaceEventAsync(networkEvent, cancellationToken).ConfigureAwait(false);
+        NetworkInterfaceEventRecorded?.Invoke(this, new NetworkInterfaceEventArgs(networkEvent));
         OnActivity(snapshot.Gateway is null ? "No default gateway detected." : $"Default gateway detected: {snapshot.Gateway}.");
     }
 

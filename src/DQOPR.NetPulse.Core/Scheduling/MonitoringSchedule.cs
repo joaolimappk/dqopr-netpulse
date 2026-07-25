@@ -49,7 +49,7 @@ public sealed class MonitoringSchedule
             new ScheduledOperation("interface", intervals.InterfaceSnapshot, TimeSpan.FromSeconds(5), startAt),
             new ScheduledOperation("route", intervals.RouteSnapshot, TimeSpan.FromSeconds(20), startAt),
             new ScheduledOperation("public-ip", intervals.PublicIp, TimeSpan.FromSeconds(10), startAt),
-            new ScheduledOperation("speed-test", intervals.SpeedTest, TimeSpan.FromMinutes(3), startAt)
+            new ScheduledOperation("speed-test", intervals.SpeedTest, TimeSpan.Zero, startAt)
         ]);
     }
 }

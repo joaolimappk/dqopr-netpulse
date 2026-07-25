@@ -15,6 +15,8 @@ public sealed class QuickTestRunner(
 
     public event EventHandler<MeasurementEventArgs>? MeasurementRecorded;
 
+    public event EventHandler<NetworkInterfaceEventArgs>? NetworkInterfaceEventRecorded;
+
     public async Task<QuickTestResult> RunAsync(QuickTestOptions options, MonitoringTargets targets, CancellationToken cancellationToken)
     {
         options.Validate();
@@ -31,7 +33,9 @@ public sealed class QuickTestRunner(
         {
             OnActivity("Detecting connection.");
             var snapshot = await environment.GetActiveInterfaceAsync(cancellationToken).ConfigureAwait(false);
-            await store.SaveNetworkInterfaceEventAsync(new NetworkInterfaceEvent(session.Id, snapshot.ObservedAt, "quick-test-snapshot", snapshot.InterfaceName, snapshot.Gateway, snapshot.Description), cancellationToken).ConfigureAwait(false);
+            var networkEvent = new NetworkInterfaceEvent(session.Id, snapshot.ObservedAt, "quick-test-snapshot", snapshot.InterfaceName, snapshot.Gateway, snapshot.Description);
+            await store.SaveNetworkInterfaceEventAsync(networkEvent, cancellationToken).ConfigureAwait(false);
+            NetworkInterfaceEventRecorded?.Invoke(this, new NetworkInterfaceEventArgs(networkEvent));
 
             if (!string.IsNullOrWhiteSpace(snapshot.Gateway))
             {

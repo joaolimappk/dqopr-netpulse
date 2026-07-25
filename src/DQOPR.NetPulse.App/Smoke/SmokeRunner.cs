@@ -61,8 +61,28 @@ public static class SmokeRunner
             },
             smokeTargets).ConfigureAwait(true);
 
-        SaveScreenshot(window, Path.Combine(options.OutputDirectory, "quick-test-complete.png"));
+        SaveTabScreenshot(window, 0, options.OutputDirectory, "quick-test-complete.png");
+        await window.ViewModel.RefreshHistoryAsync().ConfigureAwait(true);
+        await window.ViewModel.OpenSelectedSessionAsync().ConfigureAwait(true);
+        SaveTabScreenshot(window, 0, options.OutputDirectory, "dashboard.png");
+        SaveTabScreenshot(window, 1, options.OutputDirectory, "history.png");
+        SaveTabScreenshot(window, 2, options.OutputDirectory, "session-details.png");
+        SaveTabScreenshot(window, 3, options.OutputDirectory, "reports.png");
+        SaveTabScreenshot(window, 4, options.OutputDirectory, "settings.png");
+        SaveTabScreenshot(window, 5, options.OutputDirectory, "activity-log.png");
+        SaveTabScreenshot(window, 6, options.OutputDirectory, "about.png");
+
+        await window.ViewModel.ExportSelectedSessionAsync("all").ConfigureAwait(true);
         await window.ViewModel.ExportLatestAsync(Path.Combine(options.OutputDirectory, "measurements-export.json")).ConfigureAwait(true);
+
+        var generatedExports = Directory.GetFiles(options.OutputDirectory, "netpulse-*.*")
+            .Select(Path.GetFileName)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var screenshots = Directory.GetFiles(options.OutputDirectory, "*.png")
+            .Select(file => new { name = Path.GetFileName(file), bytes = new FileInfo(file).Length })
+            .OrderBy(item => item.name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
         await File.WriteAllTextAsync(
             Path.Combine(options.OutputDirectory, "smoke_metadata.json"),
@@ -73,9 +93,18 @@ public static class SmokeRunner
                     environment = "GitHub Windows runner smoke test or local smoke mode",
                     screenshots = "WPF RenderTargetBitmap, not an attended desktop screenshot",
                     database = options.DatabasePath,
-                    monitoringDurationSeconds = options.DurationSeconds
+                    monitoringDurationSeconds = options.DurationSeconds,
+                    screenshotFiles = screenshots,
+                    exportFiles = generatedExports
                 },
                 new JsonSerializerOptions { WriteIndented = true })).ConfigureAwait(true);
+    }
+
+    private static void SaveTabScreenshot(MainWindow window, int selectedTabIndex, string outputDirectory, string fileName)
+    {
+        window.ViewModel.SelectedTabIndex = selectedTabIndex;
+        window.UpdateLayout();
+        SaveScreenshot(window, Path.Combine(outputDirectory, fileName));
     }
 
     private static void SaveScreenshot(MainWindow window, string path)

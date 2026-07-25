@@ -145,6 +145,24 @@ public sealed class SqliteNetPulseStore(string connectionString) : INetPulseStor
             cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task SaveManualMarkerAsync(ManualMarker marker, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            INSERT INTO manual_markers (id, session_id, observed_at, note)
+            VALUES ($id, $session_id, $observed_at, $note);
+            """;
+        await ExecuteAsync(
+            sql,
+            command =>
+            {
+                command.Parameters.AddWithValue("$id", marker.Id.ToString());
+                command.Parameters.AddWithValue("$session_id", marker.SessionId.ToString());
+                command.Parameters.AddWithValue("$observed_at", marker.ObservedAt.ToString("O"));
+                command.Parameters.AddWithValue("$note", marker.Note);
+            },
+            cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<IReadOnlyList<ProbeMeasurement>> GetMeasurementsAsync(Guid sessionId, CancellationToken cancellationToken)
     {
         var measurements = new List<ProbeMeasurement>();
@@ -206,6 +224,76 @@ public sealed class SqliteNetPulseStore(string connectionString) : INetPulseStor
         }
 
         return speedTests;
+    }
+
+    public async Task<IReadOnlyList<NetworkInterfaceEvent>> GetNetworkInterfaceEventsAsync(Guid sessionId, CancellationToken cancellationToken)
+    {
+        var events = new List<NetworkInterfaceEvent>();
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT observed_at, event_type, interface_name, gateway, details
+            FROM network_interface_events
+            WHERE session_id = $session_id
+            ORDER BY observed_at, id;
+            """;
+        command.Parameters.AddWithValue("$session_id", sessionId.ToString());
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            events.Add(new NetworkInterfaceEvent(
+                sessionId,
+                DateTimeOffset.Parse(reader.GetString(0)),
+                reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4)));
+        }
+
+        return events;
+    }
+
+    public async Task<IReadOnlyList<ManualMarker>> GetManualMarkersAsync(Guid sessionId, CancellationToken cancellationToken)
+    {
+        var markers = new List<ManualMarker>();
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, observed_at, note
+            FROM manual_markers
+            WHERE session_id = $session_id
+            ORDER BY observed_at;
+            """;
+        command.Parameters.AddWithValue("$session_id", sessionId.ToString());
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            markers.Add(new ManualMarker(
+                Guid.Parse(reader.GetString(0)),
+                sessionId,
+                DateTimeOffset.Parse(reader.GetString(1)),
+                reader.GetString(2)));
+        }
+
+        return markers;
+    }
+
+    public async Task DeleteSessionAsync(Guid sessionId, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var table in new[] { "measurements", "speed_tests", "incidents", "manual_markers", "network_interface_events", "sessions" })
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = (SqliteTransaction)transaction;
+            command.CommandText = $"DELETE FROM {table} WHERE {(table == "sessions" ? "id" : "session_id")} = $session_id;";
+            command.Parameters.AddWithValue("$session_id", sessionId.ToString());
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<SqliteConnection> OpenAsync(CancellationToken cancellationToken)

@@ -28,21 +28,26 @@
 - [x] TCP probes.
 - [x] DNS probes.
 - [x] HTTPS probes.
-- [ ] Route snapshots.
-- [ ] Interface snapshots.
+- [x] Route snapshots.
+- [x] Interface snapshots.
 - [ ] Public-IP checks.
 - [x] Built-in speed-test estimate.
 - [x] SQLite repository layer.
-- [ ] Reports and CSV exports.
-- [ ] Graphs.
+- [x] Reports and CSV exports.
+- [x] Basic graph rendering in WPF details and HTML reports.
 - [x] WPF MVVM dashboard.
-- [ ] Settings and sessions pages.
+- [x] Settings and sessions pages.
+- [x] Activity log and About pages.
+- [x] Manual issue markers.
+- [x] Minimize-to-tray Restore/Exit menu.
+- [x] Expanded UI smoke screenshot capture.
 
 ## Windows
 
 - [x] Windows build workflow passes.
 - [x] Windows smoke workflow produces screenshots and SQLite/export evidence.
 - [x] Workflow run `30142831951` verified artifact counts: 2 sessions, 38 measurements, 6 speed-test rows, 5 network-interface events, 0 incidents.
+- [ ] Windows workflow passes for C# UI milestone `0.3.0-alpha.3`.
 - [ ] WPF app launches on Windows 10.
 - [ ] WPF app launches on Windows 11.
 - [ ] Quick Test works on Windows.
