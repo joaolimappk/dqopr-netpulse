@@ -31,7 +31,7 @@ Version: `0.3.0-alpha.3`
 
 ## Implemented But Unverified
 
-- WPF dashboard, History, Session Details, Reports, Settings, Activity Log, and About are wired to the view model and ready for GitHub Windows runner smoke validation.
+- WPF dashboard, History, Session Details, Reports, Settings, Activity Log, and About are wired to the view model and passed GitHub Windows runner smoke validation.
 - SQLite persistence stores/retrieves sessions, probe measurements, speed tests, and interface events in tests, but not yet tested under multi-day sessions.
 - Schedule logic is integrated into a running monitor and unit tested with fakes.
 - Built-in throughput estimate is implemented, but it is not an ISP-certified speed test.
@@ -51,10 +51,10 @@ Version: `0.3.0-alpha.3`
 
 ## Latest Verification
 
-- Previous verified GitHub Actions run `30142831951`: passed on `windows-latest` for commit `7a7b1a9b087a17bcfe1bddea77895ef3c4bbc11f`, built, tested, published WPF app artifact `dqopr-netpulse-csharp-win-x64`, and uploaded smoke evidence artifact `dqopr-netpulse-csharp-smoke-evidence`.
-- Previous smoke evidence artifact `dqopr-netpulse-csharp-smoke-evidence`: verified locally after download; includes `active-monitoring.png`, `quick-test-complete.png`, `netpulse-smoke.sqlite3`, `measurements-export.json`, and `smoke_metadata.json`.
-- Previous smoke SQLite evidence: 2 sessions, 38 measurements, 6 speed-test rows, 5 network-interface events, 0 incidents.
-- Current milestone local .NET validation: blocked on this Ubuntu machine because `dotnet` is not installed.
-- Current milestone GitHub Windows runner validation: pending after push.
+- Current verified GitHub Actions run `30144179021`: passed on `windows-latest` for commit `74a6dcf48589c77ff5bbffe5be35900f10119fa8`, built, tested, published WPF app artifact `dqopr-netpulse-csharp-win-x64`, and uploaded smoke evidence artifact `dqopr-netpulse-csharp-smoke-evidence`.
+- Current smoke evidence artifact `dqopr-netpulse-csharp-smoke-evidence`: verified locally after download; includes `active-monitoring.png`, `dashboard.png`, `quick-test-complete.png`, `history.png`, `session-details.png`, `reports.png`, `settings.png`, `activity-log.png`, `about.png`, `netpulse-smoke.sqlite3`, `measurements-export.json`, `smoke_metadata.json`, CSV export, JSON export, and HTML report.
+- Current smoke SQLite evidence: 2 sessions, 37 measurements, 6 speed-test rows, 4 network-interface events, 0 manual markers, 0 incidents.
+- Current local Linux-compatible validation: `python3 -m ruff check .` passed; `python3 -m mypy src/dqopr_netpulse` passed; `python3 -m pytest -q` passed, 24 tests with 2 skipped; `git diff --check` passed.
+- Current local .NET validation: blocked on this Ubuntu machine because `dotnet` is not installed.
 - Real attended Windows desktop verification: not yet completed.
 - Installer verification: not yet started.

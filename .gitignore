@@ -47,6 +47,7 @@ obj/
 /dist/
 /release_artifacts/
 /downloaded-artifacts/
+.artifacts/
 TestResults/
 tmp/
 temp/
