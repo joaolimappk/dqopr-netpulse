@@ -303,9 +303,12 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         }
         catch (Exception ex)
         {
-            ShowSafeError("Monitoring could not start.", ex);
-            IsMonitoring = false;
-            RaiseState();
+            Dispatch(() =>
+            {
+                ShowSafeError("Monitoring could not start.", ex);
+                IsMonitoring = false;
+                RaiseState();
+            });
         }
     }
 
@@ -398,7 +401,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         var sessionMeasurements = await store.GetMeasurementsAsync(sessionId.Value, CancellationToken.None).ConfigureAwait(false);
         var sessionSpeeds = await store.GetSpeedTestsAsync(sessionId.Value, CancellationToken.None).ConfigureAwait(false);
         await JsonMeasurementExporter.ExportAsync(path, sessions, sessionMeasurements, sessionSpeeds, CancellationToken.None).ConfigureAwait(false);
-        AddActivity($"Export completed: {path}");
+        Dispatch(() => AddActivity($"Export completed: {path}"));
     }
 
     public async Task RefreshHistoryAsync()
@@ -437,7 +440,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         var session = (await store.GetSessionsAsync(CancellationToken.None).ConfigureAwait(false)).FirstOrDefault(item => item.Id == SelectedSession.Id);
         if (session is null)
         {
-            Feedback = "The selected session is no longer available.";
+            Dispatch(() => { Feedback = "The selected session is no longer available."; });
             await RefreshHistoryAsync().ConfigureAwait(false);
             return;
         }
@@ -496,7 +499,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         var session = sessions.FirstOrDefault(item => item.Id == sessionId.Value);
         if (session is null)
         {
-            Feedback = "The selected session is no longer available for export.";
+            Dispatch(() => { Feedback = "The selected session is no longer available for export."; });
             await RefreshHistoryAsync().ConfigureAwait(false);
             return;
         }
@@ -530,10 +533,13 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
             generated.Add(path);
         }
 
-        LastGeneratedFile = generated.LastOrDefault() ?? "";
-        Feedback = $"Export completed in {outputDirectory}.";
-        AddActivity(Feedback);
-        RaiseState();
+        Dispatch(() =>
+        {
+            LastGeneratedFile = generated.LastOrDefault() ?? "";
+            Feedback = $"Export completed in {outputDirectory}.";
+            AddActivity(Feedback);
+            RaiseState();
+        });
     }
 
     public async Task AddManualMarkerAsync()
@@ -559,16 +565,20 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
             return;
         }
 
-        await settingsStore.SaveAsync(DraftSettings, CancellationToken.None).ConfigureAwait(false);
-        settings = DraftSettings with { };
-        DraftSettings = settings with { };
-        ExportDirectory = settings.ExportDirectory;
-        SettingsValidation = "Settings saved.";
-        AddActivity("Settings saved.");
-        OnPropertyChanged(nameof(AppDataFolder));
-        OnPropertyChanged(nameof(LogsFolder));
-        OnPropertyChanged(nameof(StartMinimizedEnabled));
-        OnPropertyChanged(nameof(MinimizeToTrayEnabled));
+        var saved = DraftSettings with { };
+        await settingsStore.SaveAsync(saved, CancellationToken.None).ConfigureAwait(false);
+        Dispatch(() =>
+        {
+            settings = saved;
+            DraftSettings = settings with { };
+            ExportDirectory = settings.ExportDirectory;
+            SettingsValidation = "Settings saved.";
+            AddActivity("Settings saved.");
+            OnPropertyChanged(nameof(AppDataFolder));
+            OnPropertyChanged(nameof(LogsFolder));
+            OnPropertyChanged(nameof(StartMinimizedEnabled));
+            OnPropertyChanged(nameof(MinimizeToTrayEnabled));
+        });
     }
 
     public Task CancelSettingsAsync()
@@ -605,8 +615,9 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     {
         Directory.CreateDirectory(LogsFolder);
         var path = Path.Combine(LogsFolder, $"netpulse-activity-{DateTime.Now:yyyyMMdd-HHmmss}.log");
-        await File.WriteAllLinesAsync(path, ActivityLog.Select(item => $"{item.Timestamp:O} {item.Message}")).ConfigureAwait(false);
-        Feedback = $"Activity log saved: {path}";
+        var lines = ActivityLog.Select(item => $"{item.Timestamp:O} {item.Message}").ToArray();
+        await File.WriteAllLinesAsync(path, lines).ConfigureAwait(false);
+        Dispatch(() => { Feedback = $"Activity log saved: {path}"; });
     }
 
     private Task OpenLastGeneratedFileAsync()
@@ -719,6 +730,17 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     }
 
     private void AddActivity(string message)
+    {
+        if (System.Windows.Application.Current?.Dispatcher.CheckAccess() == false)
+        {
+            Dispatch(() => AddActivityCore(message));
+            return;
+        }
+
+        AddActivityCore(message);
+    }
+
+    private void AddActivityCore(string message)
     {
         var entry = new ActivityLogEntry(DateTimeOffset.Now, message);
         ActivityLog.Insert(0, entry);
