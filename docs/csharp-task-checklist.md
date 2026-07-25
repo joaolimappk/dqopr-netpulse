@@ -40,8 +40,8 @@
 
 ## Windows
 
-- [ ] Windows build workflow passes.
-- [ ] Windows smoke workflow produces screenshots and SQLite/export evidence.
+- [x] Windows build workflow passes.
+- [x] Windows smoke workflow produces screenshots and SQLite/export evidence.
 - [ ] WPF app launches on Windows 10.
 - [ ] WPF app launches on Windows 11.
 - [ ] Quick Test works on Windows.
