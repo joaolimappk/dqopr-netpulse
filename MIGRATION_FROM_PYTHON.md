@@ -29,3 +29,16 @@ The C# schema starts separately at schema version 1. Before C# replaces the Pyth
 - A documented decision to keep Python and C# session stores separate for prereleases.
 
 No migration code may modify an existing Python database in place without first creating a backup.
+
+## Current C# Schema Differences
+
+The C# rewrite keeps session and measurement concepts but uses a new schema version with explicit tables for:
+
+- `sessions`
+- `measurements`
+- `speed_tests`
+- `incidents`
+- `manual_markers`
+- `network_interface_events`
+
+The C# vertical slice stores probe methods as explicit enum names and keeps ICMP packet loss separate from TCP, DNS, HTTPS, and speed-test failures. Python databases are not migrated automatically yet.

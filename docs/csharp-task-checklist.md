@@ -19,28 +19,29 @@
 - [x] Jitter is per target and method.
 - [ ] Rolling median, P95, and spike thresholds.
 - [ ] Stateful incident lifecycle.
-- [ ] Pause time excluded from active duration.
+- [x] Pause time excluded from active duration.
 
 ## Implementation
 
-- [ ] Cancellation-safe monitor coordinator.
-- [ ] ICMP probes.
-- [ ] TCP probes.
-- [ ] DNS probes.
-- [ ] HTTPS probes.
+- [x] Cancellation-safe monitor coordinator.
+- [x] ICMP probes.
+- [x] TCP probes.
+- [x] DNS probes.
+- [x] HTTPS probes.
 - [ ] Route snapshots.
 - [ ] Interface snapshots.
 - [ ] Public-IP checks.
-- [ ] Built-in speed-test estimate.
-- [ ] SQLite repository layer.
+- [x] Built-in speed-test estimate.
+- [x] SQLite repository layer.
 - [ ] Reports and CSV exports.
 - [ ] Graphs.
-- [ ] WPF MVVM dashboard.
+- [x] WPF MVVM dashboard.
 - [ ] Settings and sessions pages.
 
 ## Windows
 
 - [ ] Windows build workflow passes.
+- [ ] Windows smoke workflow produces screenshots and SQLite/export evidence.
 - [ ] WPF app launches on Windows 10.
 - [ ] WPF app launches on Windows 11.
 - [ ] Quick Test works on Windows.

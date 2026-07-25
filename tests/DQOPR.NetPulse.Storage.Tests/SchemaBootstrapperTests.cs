@@ -23,7 +23,7 @@ public sealed class SchemaBootstrapperTests
             await connection.OpenAsync(CancellationToken.None);
 
             await using var command = connection.CreateCommand();
-            command.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('sessions', 'measurements') ORDER BY name;";
+            command.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('sessions', 'measurements', 'speed_tests', 'incidents', 'manual_markers', 'network_interface_events') ORDER BY name;";
             var names = new List<string>();
             await using var reader = await command.ExecuteReaderAsync(CancellationToken.None);
             while (await reader.ReadAsync(CancellationToken.None))
@@ -31,7 +31,7 @@ public sealed class SchemaBootstrapperTests
                 names.Add(reader.GetString(0));
             }
 
-            Assert.Equal(["measurements", "sessions"], names);
+            Assert.Equal(["incidents", "manual_markers", "measurements", "network_interface_events", "sessions", "speed_tests"], names);
         }
         finally
         {

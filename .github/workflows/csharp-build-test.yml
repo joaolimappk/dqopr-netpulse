@@ -49,6 +49,37 @@ jobs:
       - name: Publish WPF app
         run: dotnet publish src/DQOPR.NetPulse.App/DQOPR.NetPulse.App.csproj --configuration Release --runtime win-x64 --self-contained true --output artifacts/DQOPR-NetPulse-win-x64
 
+      - name: Run WPF smoke test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Join-Path $PWD "artifacts/DQOPR-NetPulse-win-x64/DQOPR.NetPulse.exe"
+          if (-not (Test-Path $exe)) {
+            throw "Published executable was not found at $exe"
+          }
+
+          $evidence = Join-Path $PWD "artifacts/smoke-evidence"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+
+          & $exe --ci-smoke --output $evidence --duration-seconds 12
+          if ($LASTEXITCODE -ne 0) {
+            throw "WPF smoke test exited with code $LASTEXITCODE"
+          }
+
+          foreach ($required in @("active-monitoring.png", "quick-test-complete.png", "netpulse-smoke.sqlite3", "measurements-export.json", "smoke_metadata.json")) {
+            $path = Join-Path $evidence $required
+            if (-not (Test-Path $path)) {
+              throw "Smoke evidence missing: $required"
+            }
+          }
+
+      - name: Upload smoke evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: dqopr-netpulse-csharp-smoke-evidence
+          path: artifacts/smoke-evidence
+          if-no-files-found: error
+
       - name: Upload published app
         uses: actions/upload-artifact@v4
         with:

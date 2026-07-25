@@ -33,60 +33,63 @@
                         <StackPanel>
                             <TextBlock FontSize="24" FontWeight="SemiBold" Text="DQOPR NetPulse" />
                             <StackPanel Margin="0,12,0,0" Orientation="Horizontal">
-                                <TextBlock Text="Elapsed active time: 00:00:00" />
-                                <TextBlock Margin="20,0,0,0" Text="Remaining: not started" />
-                                <TextBlock Margin="20,0,0,0" Text="Last measurement: none" />
+                                <TextBlock Text="{Binding ElapsedActiveTime, StringFormat=Elapsed active time: {0}}" />
+                                <TextBlock Margin="20,0,0,0" Text="{Binding RemainingTime, StringFormat=Remaining: {0}}" />
+                                <TextBlock Margin="20,0,0,0" Text="{Binding LastMeasurementAge, StringFormat=Last measurement: {0}}" />
                             </StackPanel>
                         </StackPanel>
                         <StackPanel Grid.Column="1" HorizontalAlignment="Right">
-                            <TextBlock FontSize="18" FontWeight="SemiBold" Text="Ready" TextAlignment="Right" />
-                            <TextBlock Margin="0,8,0,0" Text="Recording: no active session" TextAlignment="Right" />
+                            <TextBlock AutomationProperties.AutomationId="StatusText" FontSize="18" FontWeight="SemiBold" Text="{Binding Status}" TextAlignment="Right" />
+                            <TextBlock Margin="0,8,0,0" Text="Recording to local SQLite" TextAlignment="Right" />
                         </StackPanel>
                     </Grid>
 
                     <UniformGrid Grid.Row="1" Margin="0,20,0,0" Columns="3" Rows="2">
                         <GroupBox Header="Latency" Margin="0,0,12,12">
-                            <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="-- ms" />
+                            <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="{Binding Latency}" />
                         </GroupBox>
                         <GroupBox Header="Packet Loss" Margin="0,0,12,12">
-                            <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="-- %" />
+                            <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="{Binding PacketLoss}" />
                         </GroupBox>
                         <GroupBox Header="Jitter" Margin="0,0,0,12">
-                            <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="Waiting for samples" />
+                            <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="{Binding Jitter}" />
                         </GroupBox>
                         <GroupBox Header="Router Health" Margin="0,0,12,0">
-                            <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="Unknown" />
+                            <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="{Binding RouterHealth}" />
                         </GroupBox>
                         <GroupBox Header="Internet Health" Margin="0,0,12,0">
-                            <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="Unknown" />
+                            <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="SemiBold" Text="{Binding InternetHealth}" />
                         </GroupBox>
                         <GroupBox Header="Current Operation">
-                            <TextBlock Margin="10" TextWrapping="Wrap" Text="Waiting to start." />
+                            <StackPanel Margin="10">
+                                <TextBlock TextWrapping="Wrap" Text="{Binding CurrentOperation}" />
+                                <TextBlock Margin="0,8,0,0" Text="{Binding DnsHealth, StringFormat=DNS: {0}}" />
+                                <TextBlock Margin="0,4,0,0" Text="{Binding HttpsHealth, StringFormat=HTTPS: {0}}" />
+                            </StackPanel>
                         </GroupBox>
                     </UniformGrid>
 
                     <Button Grid.Row="2"
+                            AutomationProperties.AutomationId="RunQuickTestButton"
                             Margin="0,6,0,0"
                             Height="44"
                             Background="{StaticResource AccentBrush}"
                             Foreground="White"
                             FontSize="17"
                             FontWeight="SemiBold"
+                            Command="{Binding QuickTestCommand}"
                             Content="Run Quick Test" />
 
                     <StackPanel Grid.Row="3" Margin="0,16,0,0" Orientation="Horizontal">
-                        <Button Width="150" Height="34" Margin="0,0,10,0" Content="Start Monitoring" />
-                        <Button Width="100" Height="34" Margin="0,0,10,0" Content="Pause" IsEnabled="False" />
-                        <Button Width="100" Height="34" Margin="0,0,10,0" Content="Stop" IsEnabled="False" />
+                        <Button AutomationProperties.AutomationId="StartMonitoringButton" Width="150" Height="34" Margin="0,0,10,0" Command="{Binding StartCommand}" Content="Start Monitoring" />
+                        <Button AutomationProperties.AutomationId="PauseButton" Width="100" Height="34" Margin="0,0,10,0" Command="{Binding PauseCommand}" Content="Pause" />
+                        <Button AutomationProperties.AutomationId="ResumeButton" Width="100" Height="34" Margin="0,0,10,0" Command="{Binding ResumeCommand}" Content="Resume" />
+                        <Button AutomationProperties.AutomationId="StopButton" Width="100" Height="34" Margin="0,0,10,0" Command="{Binding StopCommand}" Content="Stop" />
                         <Button Width="190" Height="34" Content="Internet Feels Bad Now" IsEnabled="False" />
                     </StackPanel>
 
                     <GroupBox Grid.Row="4" Margin="0,20,0,0" Header="Recent activity">
-                        <ListBox BorderThickness="0">
-                            <ListBoxItem Content="Ready to detect active network adapter." />
-                            <ListBoxItem Content="Quick Test will use 10 to 20 latency samples per target." />
-                            <ListBoxItem Content="Scheduled speed tests run independently from latency probes." />
-                        </ListBox>
+                        <ListBox AutomationProperties.AutomationId="RecentActivityList" BorderThickness="0" ItemsSource="{Binding RecentActivity}" />
                     </GroupBox>
                 </Grid>
             </TabItem>
