@@ -4,7 +4,7 @@ using DQOPR.NetPulse.App.Smoke;
 
 namespace DQOPR.NetPulse.App;
 
-public partial class App : Application
+public partial class App : System.Windows.Application
 {
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -53,7 +53,7 @@ public partial class App : Application
 
         if (Current?.MainWindow?.IsVisible == true)
         {
-            MessageBox.Show(Current.MainWindow, exception.Message, "DQOPR NetPulse error", MessageBoxButton.OK, MessageBoxImage.Error);
+            System.Windows.MessageBox.Show(Current.MainWindow, exception.Message, "DQOPR NetPulse error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 }

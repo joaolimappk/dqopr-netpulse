@@ -64,7 +64,7 @@ public partial class MainWindow : Window
             settingsStore,
             defaultSettings,
             action => Dispatcher.InvokeAsync(action),
-            (title, message) => MessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Warning),
+            (title, message) => System.Windows.MessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Warning),
             Confirm,
             Close);
     }
@@ -76,7 +76,7 @@ public partial class MainWindow : Window
             return true;
         }
 
-        return MessageBox.Show(this, message, title, MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+        return System.Windows.MessageBox.Show(this, message, title, MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
     }
 
     protected override void OnClosed(EventArgs e)
