@@ -61,9 +61,18 @@ jobs:
           $evidence = Join-Path $PWD "artifacts/smoke-evidence"
           New-Item -ItemType Directory -Force -Path $evidence | Out-Null
 
-          & $exe --ci-smoke --output $evidence --duration-seconds 12
-          if ($LASTEXITCODE -ne 0) {
-            throw "WPF smoke test exited with code $LASTEXITCODE"
+          $process = Start-Process -FilePath $exe -ArgumentList @("--ci-smoke", "--output", $evidence, "--duration-seconds", "12") -PassThru
+          if (-not $process.WaitForExit(120000)) {
+            $process.Kill()
+            throw "WPF smoke test did not finish within 120 seconds"
+          }
+
+          if ($process.ExitCode -ne 0) {
+            $errorFile = Join-Path $evidence "smoke-error.txt"
+            if (Test-Path $errorFile) {
+              Get-Content $errorFile | Write-Error
+            }
+            throw "WPF smoke test exited with code $($process.ExitCode)"
           }
 
           foreach ($required in @("active-monitoring.png", "quick-test-complete.png", "netpulse-smoke.sqlite3", "measurements-export.json", "smoke_metadata.json")) {
