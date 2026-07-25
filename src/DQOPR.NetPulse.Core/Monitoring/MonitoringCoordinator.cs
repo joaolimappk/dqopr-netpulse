@@ -209,16 +209,13 @@ public sealed class MonitoringCoordinator(
 
     private async Task RunOperationAsync(Guid sessionId, MonitoringOptions options, ScheduledOperation operation, CancellationToken cancellationToken)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(operation.Timeout);
-
         switch (operation.Name)
         {
             case "icmp":
                 foreach (var target in GetIcmpTargets(options))
                 {
                     OnActivity($"Pinging {target.Name}.");
-                    await SaveMeasurementAsync(await probes.ProbeIcmpAsync(sessionId, target, Interlocked.Increment(ref sequence), operation.Timeout, timeout.Token).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+                    await SaveMeasurementAsync(await probes.ProbeIcmpAsync(sessionId, target, Interlocked.Increment(ref sequence), operation.Timeout, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
                 }
 
                 break;
@@ -226,24 +223,24 @@ public sealed class MonitoringCoordinator(
                 foreach (var target in options.Targets.TcpTargets)
                 {
                     OnActivity($"Testing TCP connection to {target.Name}.");
-                    await SaveMeasurementAsync(await probes.ProbeTcpAsync(sessionId, target, operation.Timeout, timeout.Token).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+                    await SaveMeasurementAsync(await probes.ProbeTcpAsync(sessionId, target, operation.Timeout, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
                 }
 
                 break;
             case "dns":
                 OnActivity($"Resolving {options.Targets.DnsHostname}.");
-                await SaveMeasurementAsync(await probes.ProbeDnsAsync(sessionId, options.Targets.DnsHostname, operation.Timeout, timeout.Token).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+                await SaveMeasurementAsync(await probes.ProbeDnsAsync(sessionId, options.Targets.DnsHostname, operation.Timeout, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
                 break;
             case "https":
                 OnActivity($"Testing website connectivity to {options.Targets.HttpsUri.Host}.");
-                await SaveMeasurementAsync(await probes.ProbeHttpsAsync(sessionId, options.Targets.HttpsUri, operation.Timeout, timeout.Token).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+                await SaveMeasurementAsync(await probes.ProbeHttpsAsync(sessionId, options.Targets.HttpsUri, operation.Timeout, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
                 break;
             case "route":
                 await DetectInterfaceAsync(sessionId, cancellationToken).ConfigureAwait(false);
                 break;
             case "speed-test":
                 OnActivity("Running download and upload throughput estimate.");
-                foreach (var speedTest in await probes.RunSpeedTestAsync(sessionId, options.Targets.DownloadUri, options.Targets.UploadUri, operation.Timeout, timeout.Token).ConfigureAwait(false))
+                foreach (var speedTest in await probes.RunSpeedTestAsync(sessionId, options.Targets.DownloadUri, options.Targets.UploadUri, operation.Timeout, cancellationToken).ConfigureAwait(false))
                 {
                     await store.SaveSpeedTestAsync(speedTest, cancellationToken).ConfigureAwait(false);
                     SpeedTestRecorded?.Invoke(this, new SpeedTestEventArgs(speedTest));
