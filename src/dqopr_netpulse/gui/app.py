@@ -55,7 +55,7 @@ from PySide6.QtWidgets import (
 
 from dqopr_netpulse.configuration import AppConfig, default_data_dir, validate_session_config
 from dqopr_netpulse.exports.csv_export import export_session_csv
-from dqopr_netpulse.models import Measurement, ProbeMethod, SessionConfig, Target
+from dqopr_netpulse.models import Measurement, ProbeMethod, SessionConfig, SpeedTestResult, Target
 from dqopr_netpulse.monitoring.engine import MonitoringSession
 from dqopr_netpulse.quick_test import QuickTestRunner, QuickTestSummary
 from dqopr_netpulse.reports.html_report import generate_html_report
@@ -370,6 +370,7 @@ class MonitoringWorker(QObject):
     activity = Signal(str)
     state_changed = Signal(str)
     measurement = Signal(object)
+    speed_test = Signal(object)
     failed = Signal(str)
     finished = Signal(str)
 
@@ -392,6 +393,7 @@ class MonitoringWorker(QObject):
                 store,
                 activity_callback=self.activity.emit,
                 measurement_callback=self.measurement.emit,
+                speedtest_callback=self.speed_test.emit,
                 state_callback=self.state_changed.emit,
             )
             session_id = loop.run_until_complete(self._session.run())
@@ -834,6 +836,7 @@ class MainWindow(QMainWindow):
         self._worker.activity.connect(self._append_activity)
         self._worker.state_changed.connect(self._handle_worker_state)
         self._worker.measurement.connect(self._handle_measurement)
+        self._worker.speed_test.connect(self._handle_speed_test)
         self._worker.failed.connect(self._worker_failed)
         self._worker.finished.connect(self._worker_finished)
         self._worker.failed.connect(self._worker_thread.quit)
@@ -982,6 +985,16 @@ class MainWindow(QMainWindow):
         self._recording_label.setText("Recording: measurements saved")
         if self._state == "starting":
             self._set_state("monitoring")
+
+    @Slot(object)
+    def _handle_speed_test(self, raw: object) -> None:
+        result = cast(SpeedTestResult, raw)
+        self.set_metric("Download", _optional_mbps(result.download_mbps, None))
+        self.set_metric("Upload", _optional_mbps(result.upload_mbps, None))
+        if result.success:
+            self._recording_label.setText("Recording: speed test saved")
+        else:
+            self._append_activity(f"Speed test unavailable: {result.error_message or 'failed'}")
 
     @Slot(str)
     def _worker_failed(self, message: str) -> None:

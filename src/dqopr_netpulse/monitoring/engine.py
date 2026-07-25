@@ -17,17 +17,21 @@ from dqopr_netpulse.models import (
     Measurement,
     NetworkInterfaceSnapshot,
     ProbeMethod,
+    SpeedTestResult,
     Target,
 )
 from dqopr_netpulse.networking import default_targets_with_gateway, detect_active_interface
 from dqopr_netpulse.probes import ProbeRunner
+from dqopr_netpulse.speedtest import run_speedtest_cli
 from dqopr_netpulse.storage import NetPulseStore
 
 LOGGER = logging.getLogger(__name__)
 InterfaceProvider = Callable[[], NetworkInterfaceSnapshot]
 ActivityCallback = Callable[[str], None]
 MeasurementCallback = Callable[[Measurement], None]
+SpeedTestCallback = Callable[[SpeedTestResult], None]
 StateCallback = Callable[[str], None]
+SpeedTestRunner = Callable[[str], SpeedTestResult]
 
 
 class MonitoringSession:
@@ -42,7 +46,9 @@ class MonitoringSession:
         session_id: str | None = None,
         activity_callback: ActivityCallback | None = None,
         measurement_callback: MeasurementCallback | None = None,
+        speedtest_callback: SpeedTestCallback | None = None,
         state_callback: StateCallback | None = None,
+        speedtest_runner: SpeedTestRunner = run_speedtest_cli,
     ) -> None:
         validate_session_config(app_config.session)
         self.app_config = app_config
@@ -52,12 +58,15 @@ class MonitoringSession:
         self.session_id = session_id or str(uuid4())
         self.activity_callback = activity_callback
         self.measurement_callback = measurement_callback
+        self.speedtest_callback = speedtest_callback
         self.state_callback = state_callback
+        self.speedtest_runner = speedtest_runner
         self._stop_event = asyncio.Event()
         self._pause_event = asyncio.Event()
         self._pause_event.set()
         self._sequence = 0
         self._recent_measurements: list[Measurement] = []
+        self._recent_speed_tests: list[SpeedTestResult] = []
 
     async def run(self) -> str:
         """Run the monitoring session until duration, cycle count, or stop."""
@@ -78,16 +87,25 @@ class MonitoringSession:
         self._activity(f"Initialized {enabled_count} monitoring target(s).")
         self._state("monitoring")
         LOGGER.info("Starting monitoring session %s with %s targets", self.session_id, len(targets))
+        next_speedtest_due = started_monotonic if config.speedtest_enabled else None
         try:
             while not self._stop_event.is_set():
                 await self._pause_event.wait()
+                now = time.monotonic()
                 if (
                     config.duration_seconds is not None
-                    and time.monotonic() - started_monotonic >= config.duration_seconds
+                    and now - started_monotonic >= config.duration_seconds
                 ):
                     break
                 if config.cycle_count is not None and cycles >= config.cycle_count:
                     break
+                if next_speedtest_due is not None and now >= next_speedtest_due:
+                    await self._run_speedtest()
+                    next_speedtest_due = _next_speedtest_due(
+                        next_speedtest_due,
+                        time.monotonic(),
+                        config.speedtest_interval_seconds,
+                    )
                 await self._run_cycle(targets)
                 cycles += 1
                 self._activity(
@@ -149,6 +167,7 @@ class MonitoringSession:
         )
         jitter_values = [float(m.jitter_ms) for m in recent if m.jitter_ms is not None]
         avg_jitter = sum(jitter_values) / len(jitter_values) if jitter_values else None
+        latest_speed = self._recent_speed_tests[-1] if self._recent_speed_tests else None
         return {
             "status": _status_label(recent),
             "current_latency_ms": avg_latency,
@@ -158,6 +177,8 @@ class MonitoringSession:
             "internet_status": "degraded" if external_failures else "healthy",
             "dns_status": _method_status(recent, ProbeMethod.DNS),
             "https_status": _method_status(recent, ProbeMethod.HTTPS),
+            "download_mbps": latest_speed.download_mbps if latest_speed is not None else None,
+            "upload_mbps": latest_speed.upload_mbps if latest_speed is not None else None,
         }
 
     async def _run_cycle(self, targets: tuple[Target, ...]) -> None:
@@ -195,6 +216,35 @@ class MonitoringSession:
             self.store.add_incident(incident)
             self._activity(f"Incident detected: {incident.incident_type.value}.")
 
+    async def _run_speedtest(self) -> None:
+        self._activity("Starting scheduled speed test.")
+        result = await asyncio.to_thread(self.speedtest_runner, self.session_id)
+        self.store.add_speed_test(result)
+        self._recent_speed_tests.append(result)
+        self._recent_speed_tests = self._recent_speed_tests[-100:]
+        self._speedtest(result)
+        for incident in classify_measurements(
+            self._recent_measurements[-50:],
+            session_id=self.session_id,
+            speed_tests=[result],
+            config=self.app_config.session,
+            thresholds=self.app_config.thresholds,
+        ):
+            self.store.add_incident(incident)
+            self._activity(f"Incident detected: {incident.incident_type.value}.")
+        if result.success:
+            download = (
+                f"{result.download_mbps:.1f} Mbps"
+                if result.download_mbps is not None
+                else "unknown"
+            )
+            upload = (
+                f"{result.upload_mbps:.1f} Mbps" if result.upload_mbps is not None else "unknown"
+            )
+            self._activity(f"Scheduled speed test saved: {download} down / {upload} up.")
+        else:
+            self._activity(f"Scheduled speed test unavailable: {result.error_message or 'failed'}.")
+
     async def _probe_icmp(self, target: Target, interface: NetworkInterfaceSnapshot) -> Measurement:
         label = "local gateway" if target.is_gateway else f"{target.name} {target.host}"
         self._activity(f"Pinging {label}.")
@@ -221,6 +271,10 @@ class MonitoringSession:
     def _measurement(self, measurement: Measurement) -> None:
         if self.measurement_callback is not None:
             self.measurement_callback(measurement)
+
+    def _speedtest(self, result: SpeedTestResult) -> None:
+        if self.speedtest_callback is not None:
+            self.speedtest_callback(result)
 
     def _state(self, state: str) -> None:
         if self.state_callback is not None:
@@ -267,3 +321,26 @@ def _measurement_activity(measurement: Measurement) -> str:
         return f"{target} responded."
     reason = measurement.error_type or "no response"
     return f"{target} did not respond ({reason})."
+
+
+def scheduled_speedtest_offsets(
+    duration_seconds: float, interval_seconds: float
+) -> tuple[float, ...]:
+    """Return speed-test offsets for bounded sessions, including t=0 and excluding the end."""
+    if duration_seconds <= 0 or interval_seconds <= 0:
+        return ()
+    offsets: list[float] = []
+    next_due = 0.0
+    while next_due < duration_seconds:
+        offsets.append(next_due)
+        next_due += interval_seconds
+    return tuple(offsets)
+
+
+def _next_speedtest_due(
+    previous_due: float, current_monotonic: float, interval_seconds: float
+) -> float:
+    next_due = previous_due + interval_seconds
+    while next_due <= current_monotonic:
+        next_due += interval_seconds
+    return next_due

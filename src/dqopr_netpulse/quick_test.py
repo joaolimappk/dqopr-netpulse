@@ -76,7 +76,7 @@ class QuickTestRunner:
             cycle_count=1,
             duration_seconds=None,
             latency_interval_seconds=min(app_config.session.latency_interval_seconds, 0.1),
-            speedtest_enabled=True,
+            speedtest_enabled=False,
         )
         self.app_config = replace(app_config, session=quick_session)
         self.store = store

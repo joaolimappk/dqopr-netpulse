@@ -16,6 +16,19 @@ The format is based on Keep a Changelog, and this project uses semantic versioni
 - Windows build and validation workflow.
 - Release validation script for tests, release metadata, secret scans, checksums, optional executable and installer builds, and signature verification.
 
+## [0.2.2] - 2026-07-25
+
+### Added
+
+- Scheduled speed-test execution in continuous monitoring sessions when speed tests are enabled.
+- Live scheduled speed-test callbacks for updating dashboard Download and Upload cards.
+- Regression coverage for a 10-minute monitoring session with a 5-minute speed-test interval scheduling exactly two speed tests.
+
+### Fixed
+
+- Fixed configured monitoring sessions not running scheduled download/upload speed tests.
+- Prevented Quick Test from double-recording speed tests after scheduled speed testing was added to the shared monitoring engine.
+
 ## [0.2.1] - 2026-07-24
 
 ### Added

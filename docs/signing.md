@@ -18,7 +18,7 @@ Never commit private signing keys, certificate files, passwords, PINs, or signin
 
 ```powershell
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a "dist\DQOPR-NetPulse\DQOPR-NetPulse.exe"
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a "release_artifacts\DQOPR-NetPulse-Setup-0.2.1.exe"
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a "release_artifacts\DQOPR-NetPulse-Setup-0.2.2.exe"
 ```
 
 Adjust the timestamp authority and certificate selection to match the maintainer's signing provider.
@@ -27,7 +27,7 @@ Adjust the timestamp authority and certificate selection to match the maintainer
 
 ```powershell
 signtool verify /pa /all "dist\DQOPR-NetPulse\DQOPR-NetPulse.exe"
-signtool verify /pa /all "release_artifacts\DQOPR-NetPulse-Setup-0.2.1.exe"
+signtool verify /pa /all "release_artifacts\DQOPR-NetPulse-Setup-0.2.2.exe"
 ```
 
 The release validator also attempts PowerShell Authenticode verification on Windows:
