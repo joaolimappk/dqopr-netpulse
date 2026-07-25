@@ -9,12 +9,17 @@ public sealed class SchemaBootstrapperTests
     public async Task CreatesInitialDurableTables()
     {
         var path = Path.Combine(Path.GetTempPath(), $"netpulse-{Guid.NewGuid():N}.db");
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Pooling = false
+        }.ToString();
 
         try
         {
-            await SchemaBootstrapper.InitializeAsync(new SqliteConnectionStringBuilder { DataSource = path }.ToString(), CancellationToken.None);
+            await SchemaBootstrapper.InitializeAsync(connectionString, CancellationToken.None);
 
-            await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path }.ToString());
+            await using var connection = new SqliteConnection(connectionString);
             await connection.OpenAsync(CancellationToken.None);
 
             await using var command = connection.CreateCommand();
@@ -30,9 +35,13 @@ public sealed class SchemaBootstrapperTests
         }
         finally
         {
-            if (File.Exists(path))
+            SqliteConnection.ClearAllPools();
+            foreach (var candidate in new[] { path, $"{path}-wal", $"{path}-shm" })
             {
-                File.Delete(path);
+                if (File.Exists(candidate))
+                {
+                    File.Delete(candidate);
+                }
             }
         }
     }
