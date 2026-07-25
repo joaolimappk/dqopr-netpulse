@@ -2,7 +2,11 @@
 
 DQOPR NetPulse is an open-source Internet Quality Monitor and ISP Evidence Reporter for Windows users. Its goal is to collect local, durable, understandable evidence about intermittent internet problems such as latency spikes, jitter, packet loss, short outages, DNS failures, HTTPS failures, and speed degradation.
 
-The project is currently in early alpha. The repository contains a working command-line monitoring engine, typed data models, configuration defaults, SQLite storage layer, conservative incident classifier, CSV/ZIP exports, graph generation, self-contained HTML report generation, a PySide6 GUI dashboard connected to the monitoring engine, tests, documentation, and Windows release scaffolding.
+The project is currently in early alpha. On `main`, the Python/PySide6 implementation is the current published alpha. On the `csharp-rewrite` branch, that Python code is preserved as a legacy prototype while a native Windows C#/.NET implementation is developed beside it.
+
+Python implementation status: **Legacy prototype — not recommended for production evidence collection**. It contains useful architecture, documentation, data models, tests, reporting ideas, and installer scaffolding, but the C# rewrite is intended to correct scheduling and statistical-methodology limitations before NetPulse is treated as production-grade evidence software.
+
+The repository contains a working command-line monitoring engine, typed data models, configuration defaults, SQLite storage layer, conservative incident classifier, CSV/ZIP exports, graph generation, self-contained HTML report generation, a PySide6 GUI dashboard connected to the monitoring engine, tests, documentation, and Windows release scaffolding.
 
 ## What NetPulse Does
 
@@ -47,6 +51,8 @@ NetPulse is local-first. It should collect only information needed for connectio
 
 ## Development Setup
 
+### Python Alpha
+
 Requirements:
 
 - Python 3.12
@@ -68,6 +74,20 @@ py -3.12 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
+
+### C# Rewrite Branch
+
+Requirements:
+
+- .NET 10 SDK
+- Windows 10 or Windows 11 for WPF runtime verification
+
+```bash
+dotnet restore DQOPR.NetPulse.sln
+dotnet test DQOPR.NetPulse.sln --configuration Release
+```
+
+The C# rewrite uses WPF and targets Windows for the desktop application. Core, diagnostics, storage, and non-UI tests are expected to run on Linux and Windows.
 
 ## Running Checks
 

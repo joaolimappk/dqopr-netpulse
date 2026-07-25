@@ -1,0 +1,57 @@
+name: C# build and test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - csharp-rewrite
+    paths:
+      - "DQOPR.NetPulse.sln"
+      - "Directory.Build.props"
+      - "global.json"
+      - "src/DQOPR.NetPulse.*/**"
+      - "tests/DQOPR.NetPulse.*/**"
+      - ".github/workflows/csharp-build-test.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "DQOPR.NetPulse.sln"
+      - "Directory.Build.props"
+      - "global.json"
+      - "src/DQOPR.NetPulse.*/**"
+      - "tests/DQOPR.NetPulse.*/**"
+      - ".github/workflows/csharp-build-test.yml"
+
+jobs:
+  build-test:
+    name: Build and test C# rewrite
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore DQOPR.NetPulse.sln
+
+      - name: Build
+        run: dotnet build DQOPR.NetPulse.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test DQOPR.NetPulse.sln --configuration Release --no-build --logger "trx;LogFileName=csharp-tests.trx"
+
+      - name: Publish WPF app
+        run: dotnet publish src/DQOPR.NetPulse.App/DQOPR.NetPulse.App.csproj --configuration Release --runtime win-x64 --self-contained true --output artifacts/DQOPR-NetPulse-win-x64
+
+      - name: Upload published app
+        uses: actions/upload-artifact@v4
+        with:
+          name: dqopr-netpulse-csharp-win-x64
+          path: artifacts/DQOPR-NetPulse-win-x64
+          if-no-files-found: error

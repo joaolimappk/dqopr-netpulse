@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\DQOPR.NetPulse.Core\DQOPR.NetPulse.Core.csproj" />
+    <ProjectReference Include="..\DQOPR.NetPulse.Diagnostics\DQOPR.NetPulse.Diagnostics.csproj" />
+    <ProjectReference Include="..\DQOPR.NetPulse.Networking\DQOPR.NetPulse.Networking.csproj" />
+    <ProjectReference Include="..\DQOPR.NetPulse.Platform.Windows\DQOPR.NetPulse.Platform.Windows.csproj" />
+    <ProjectReference Include="..\DQOPR.NetPulse.Reporting\DQOPR.NetPulse.Reporting.csproj" />
+    <ProjectReference Include="..\DQOPR.NetPulse.Storage\DQOPR.NetPulse.Storage.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyName>DQOPR.NetPulse</AssemblyName>
+    <RootNamespace>DQOPR.NetPulse.App</RootNamespace>
+    <ApplicationIcon />
+  </PropertyGroup>
+
+</Project>
