@@ -218,44 +218,55 @@ public sealed class NetworkProbeService(HttpClient? httpClient = null) : INetwor
 
     private async Task<ThroughputStreamResult> DownloadStreamAsync(Uri uri, TimeSpan duration, int streamIndex, CancellationToken cancellationToken)
     {
-        var endpoint = CacheBusted(uri, streamIndex);
         var startedAt = DateTimeOffset.UtcNow;
-        var setup = Stopwatch.StartNew();
+        var setupDuration = TimeSpan.Zero;
+        var transferDuration = TimeSpan.Zero;
+        long bytes = 0;
+        var requestIndex = 0;
+        string? httpVersion = null;
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, endpoint) { VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher };
-            request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
-            request.Headers.AcceptEncoding.Clear();
-            request.Headers.TryAddWithoutValidation("Accept-Encoding", "identity");
-            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-            setup.Stop();
-            if (!response.IsSuccessStatusCode)
+            while (transferDuration < duration)
             {
-                return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, setup.Elapsed, $"HTTP {(int)response.StatusCode}", response.ReasonPhrase ?? "Download endpoint returned an invalid status.", response.Version.ToString());
-            }
-
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            var buffer = new byte[DownloadBufferSize];
-            long bytes = 0;
-            var transfer = Stopwatch.StartNew();
-            while (transfer.Elapsed < duration)
-            {
-                var read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-                if (read == 0)
+                requestIndex++;
+                var endpoint = CacheBusted(uri, streamIndex, requestIndex);
+                var setup = Stopwatch.StartNew();
+                using var request = new HttpRequestMessage(HttpMethod.Get, endpoint) { VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher };
+                request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+                request.Headers.AcceptEncoding.Clear();
+                request.Headers.TryAddWithoutValidation("Accept-Encoding", "identity");
+                using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                setup.Stop();
+                setupDuration += setup.Elapsed;
+                httpVersion = response.Version.ToString();
+                if (!response.IsSuccessStatusCode)
                 {
-                    break;
+                    return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, setupDuration, $"HTTP {(int)response.StatusCode}", response.ReasonPhrase ?? "Download endpoint returned an invalid status.", httpVersion);
                 }
 
-                bytes += read;
+                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                var buffer = new byte[DownloadBufferSize];
+                var transfer = Stopwatch.StartNew();
+                while (transferDuration + transfer.Elapsed < duration)
+                {
+                    var read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    bytes += read;
+                }
+
+                transfer.Stop();
+                transferDuration += transfer.Elapsed;
             }
 
-            transfer.Stop();
-            return ThroughputStreamResult.Success(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup.Elapsed, transfer.Elapsed, response.Version.ToString());
+            return ThroughputStreamResult.Success(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setupDuration, transferDuration, httpVersion);
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException)
         {
-            setup.Stop();
-            return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, setup.Elapsed, ex.GetType().Name, ex.Message, null);
+            return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, setupDuration, ex.GetType().Name, ex.Message, httpVersion);
         }
     }
 
@@ -269,7 +280,7 @@ public sealed class NetworkProbeService(HttpClient? httpClient = null) : INetwor
         {
             while (transfer.Elapsed < duration)
             {
-                var endpoint = CacheBusted(uri, streamIndex);
+                var endpoint = CacheBusted(uri, streamIndex, bytes / payload.LongLength);
                 var setupWatch = Stopwatch.StartNew();
                 using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher };
                 request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
@@ -342,10 +353,10 @@ public sealed class NetworkProbeService(HttpClient? httpClient = null) : INetwor
         return remaining > TimeSpan.FromSeconds(12) ? TimeSpan.FromSeconds(12) : remaining;
     }
 
-    private static Uri CacheBusted(Uri uri, int streamIndex)
+    private static Uri CacheBusted(Uri uri, int streamIndex, long requestIndex)
     {
         var separator = string.IsNullOrEmpty(uri.Query) ? "?" : "&";
-        return new Uri($"{uri}{separator}np_cache_bust={Guid.NewGuid():N}&np_stream={streamIndex}");
+        return new Uri($"{uri}{separator}np_cache_bust={Guid.NewGuid():N}&np_stream={streamIndex}&np_request={requestIndex}");
     }
 
     private static byte[] RandomPayload(int size)

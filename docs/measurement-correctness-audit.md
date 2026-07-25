@@ -67,7 +67,7 @@ Alpha.3 upload used a single 256 KiB POST to a general-purpose `httpbin.org` end
 Alpha.4 built-in throughput behavior:
 
 - Provider label: `NetPulse built-in estimate`.
-- Default download endpoint: `https://speed.cloudflare.com/__down?bytes=500000000`.
+- Default download endpoint: `https://speed.cloudflare.com/__down?bytes=25000000`, repeated with cache-busting inside each stream until the timed transfer window ends.
 - Default upload endpoint: `https://speed.cloudflare.com/__up`.
 - HTTPS only by default.
 - Cache-busting query parameters per stream.
