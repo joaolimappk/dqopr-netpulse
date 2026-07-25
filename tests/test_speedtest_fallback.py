@@ -34,8 +34,12 @@ class FakeResponse:
 
 
 def test_builtin_http_speedtest_measures_download_and_upload() -> None:
-    def opener(request: urllib.request.Request, _timeout: float) -> FakeResponse:
-        if request.data is not None:
+    calls = 0
+
+    def opener(_request: urllib.request.Request, _timeout: float) -> FakeResponse:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
             return FakeResponse(b"ok")
         return FakeResponse(b"x" * 8_000_000)
 
@@ -47,3 +51,4 @@ def test_builtin_http_speedtest_measures_download_and_upload() -> None:
     assert result.upload_mbps is not None
     assert result.upload_mbps > 0
     assert "Built-in HTTPS throughput estimate" in result.methodology
+    assert calls == 2
