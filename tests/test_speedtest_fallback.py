@@ -35,7 +35,7 @@ class FakeResponse:
 
 def test_builtin_http_speedtest_measures_download_and_upload() -> None:
     def opener(request: urllib.request.Request, _timeout: float) -> FakeResponse:
-        if str(request.full_url).endswith("/__up"):
+        if request.data is not None:
             return FakeResponse(b"ok")
         return FakeResponse(b"x" * 8_000_000)
 
