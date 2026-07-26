@@ -2,7 +2,7 @@
 
 Branch: `csharp-rewrite`
 
-Version: `0.3.0-alpha.4`
+Version: `0.3.0-alpha.5`
 
 Use this checklist on a real Windows 10 or Windows 11 desktop before proposing a merge to `main`.
 
@@ -35,8 +35,18 @@ Use this checklist on a real Windows 10 or Windows 11 desktop before proposing a
 ## History and details
 
 - [ ] Open History and confirm stored sessions appear with start/end/duration/status/interface/gateway/measurement/loss/latency/speed columns.
+- [ ] Open latest Quick Test from History.
 - [ ] Select a session and click Open Details.
 - [ ] Confirm Session Details shows metadata, measurements, ICMP packet loss, DNS/TCP/HTTPS rows, speed-test rows, interface events, markers, and nonblank charts.
+- [ ] Confirm Timeline is populated and includes local time, UTC time, method, target, host, address family, sequence, result, latency, failure category/message, probe stream ID, and methodology version.
+- [ ] Confirm ICMP results are populated and router/internet targets are not mixed.
+- [ ] Confirm DNS/TCP/HTTPS results are populated separately from ICMP latency statistics.
+- [ ] Confirm speed-test diagnostics are populated, including invalid-result reason and confidence flags where available.
+- [ ] Confirm all Session Details charts are populated for a complete Quick Test.
+- [ ] Switch between multiple sessions and confirm details follow the selected session.
+- [ ] Export Timeline CSV from Session Details.
+- [ ] Generate report from Session Details.
+- [ ] Run and inspect a longer continuous-monitoring session.
 - [ ] Use the History row context menu for Open details and Export session.
 - [ ] Delete a disposable test session and confirm the confirmation prompt appears.
 

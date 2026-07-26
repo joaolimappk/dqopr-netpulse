@@ -5,6 +5,8 @@ using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Text;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -34,6 +36,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     private readonly List<SpeedTestMeasurement> speedTests = [];
     private CancellationTokenSource? monitoringCancellation;
     private CancellationTokenSource? quickTestCancellation;
+    private CancellationTokenSource? detailLoadCancellation;
     private ApplicationSettings settings;
     private string status = "Ready";
     private string elapsedActiveTime = "00:00:00";
@@ -63,8 +66,19 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     private string referenceLatency = "";
     private string referenceNotes = "";
     private string referenceFeedback = "";
+    private string detailStatus = "Select a session from History and open details.";
+    private string detailErrorSummary = "";
+    private string detailSummaryHeader = "No session loaded.";
+    private string timelineEmptyMessage = "No session details loaded.";
+    private string icmpEmptyMessage = "No ICMP measurements were recorded for this session.";
+    private string connectivityEmptyMessage = "No DNS, TCP, or HTTPS measurements were recorded for this session.";
+    private string speedTestsEmptyMessage = "No speed-test rows were recorded for this session.";
+    private string eventsEmptyMessage = "No events or markers were recorded for this session.";
+    private bool isDetailLoading;
     private int selectedTabIndex;
+    private int selectedDetailTabIndex;
     private Guid? latestSessionId;
+    private Guid? loadedDetailSessionId;
     private SessionSummaryViewModel? selectedSession;
     private string settingsValidation = "";
     private bool initialized;
@@ -102,6 +116,9 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         MarkerCommand = new RelayCommand(AddManualMarkerAsync, () => latestSessionId is not null);
         RefreshCommand = new RelayCommand(RefreshHistoryAsync);
         OpenSessionCommand = new RelayCommand(OpenSelectedSessionAsync, () => SelectedSession is not null);
+        RefreshDetailsCommand = new RelayCommand(RefreshSelectedSessionDetailsAsync, () => SelectedSession is not null && !IsDetailLoading);
+        PreviousSessionCommand = new RelayCommand(OpenPreviousSessionAsync, () => SelectedSession is not null && Sessions.Count > 1 && !IsDetailLoading);
+        NextSessionCommand = new RelayCommand(OpenNextSessionAsync, () => SelectedSession is not null && Sessions.Count > 1 && !IsDetailLoading);
         DeleteSelectedSessionCommand = new RelayCommand(DeleteSelectedSessionAsync, () => SelectedSession is not null);
         ExportCurrentSessionCommand = new RelayCommand(() => ExportSelectedSessionAsync("all"), () => SelectedSession is not null || latestSessionId is not null);
         ExportCsvCommand = new RelayCommand(() => ExportSelectedSessionAsync("csv"), () => SelectedSession is not null || latestSessionId is not null);
@@ -109,6 +126,9 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         GenerateHtmlReportCommand = new RelayCommand(() => ExportSelectedSessionAsync("html"), () => SelectedSession is not null || latestSessionId is not null);
         OpenExportFolderCommand = new RelayCommand(() => OpenFolderAsync(ExportDirectory));
         OpenLastExportCommand = new RelayCommand(OpenLastGeneratedFileAsync, () => !string.IsNullOrWhiteSpace(LastGeneratedFile) && File.Exists(LastGeneratedFile));
+        CopySessionIdCommand = new RelayCommand(CopySessionIdAsync, () => SelectedSession is not null);
+        CopyTimelineRowsCommand = new RelayCommand(CopyTimelineRowsAsync, () => DetailTimelineRows.Count > 0);
+        ExportTimelineCsvCommand = new RelayCommand(ExportTimelineCsvAsync, () => DetailTimelineRows.Count > 0);
         SaveReferenceResultCommand = new RelayCommand(SaveReferenceResultAsync);
         SaveSettingsCommand = new RelayCommand(SaveSettingsAsync);
         CancelSettingsCommand = new RelayCommand(CancelSettingsAsync);
@@ -161,6 +181,18 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
 
     public ObservableCollection<TargetPacketLoss> DetailPacketLoss { get; } = [];
 
+    public ObservableCollection<SessionTimelineRow> DetailTimelineRows { get; } = [];
+
+    public ObservableCollection<IcmpPacketLossDetailRow> DetailIcmpSummaryRows { get; } = [];
+
+    public ObservableCollection<IcmpRawRow> DetailIcmpRows { get; } = [];
+
+    public ObservableCollection<ConnectivityDetailRow> DetailConnectivityRows { get; } = [];
+
+    public ObservableCollection<SpeedTestDetailRow> DetailSpeedTestRows { get; } = [];
+
+    public ObservableCollection<SessionEventDetailRow> DetailEventRows { get; } = [];
+
     public PointCollection LatencyChartPoints { get; } = [];
 
     public PointCollection JitterChartPoints { get; } = [];
@@ -177,6 +209,9 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     public ICommand MarkerCommand { get; }
     public ICommand RefreshCommand { get; }
     public ICommand OpenSessionCommand { get; }
+    public ICommand RefreshDetailsCommand { get; }
+    public ICommand PreviousSessionCommand { get; }
+    public ICommand NextSessionCommand { get; }
     public ICommand DeleteSelectedSessionCommand { get; }
     public ICommand ExportCurrentSessionCommand { get; }
     public ICommand ExportCsvCommand { get; }
@@ -184,6 +219,9 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     public ICommand GenerateHtmlReportCommand { get; }
     public ICommand OpenExportFolderCommand { get; }
     public ICommand OpenLastExportCommand { get; }
+    public ICommand CopySessionIdCommand { get; }
+    public ICommand CopyTimelineRowsCommand { get; }
+    public ICommand ExportTimelineCsvCommand { get; }
     public ICommand SaveReferenceResultCommand { get; }
     public ICommand SaveSettingsCommand { get; }
     public ICommand CancelSettingsCommand { get; }
@@ -208,6 +246,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     public bool IsMonitoring { get; private set; }
     public bool IsPaused { get; private set; }
     public bool IsQuickTestRunning { get; private set; }
+    public bool IsDetailLoading { get => isDetailLoading; private set => SetField(ref isDetailLoading, value); }
 
     public string Version => Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
 
@@ -251,7 +290,21 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
     public string ReferenceLatency { get => referenceLatency; set => SetField(ref referenceLatency, value); }
     public string ReferenceNotes { get => referenceNotes; set => SetField(ref referenceNotes, value); }
     public string ReferenceFeedback { get => referenceFeedback; private set => SetField(ref referenceFeedback, value); }
+    public string DetailStatus { get => detailStatus; private set => SetField(ref detailStatus, value); }
+    public string DetailErrorSummary { get => detailErrorSummary; private set => SetField(ref detailErrorSummary, value); }
+    public string DetailSummaryHeader { get => detailSummaryHeader; private set => SetField(ref detailSummaryHeader, value); }
+    public string TimelineEmptyMessage { get => timelineEmptyMessage; private set => SetField(ref timelineEmptyMessage, value); }
+    public string IcmpEmptyMessage { get => icmpEmptyMessage; private set => SetField(ref icmpEmptyMessage, value); }
+    public string ConnectivityEmptyMessage { get => connectivityEmptyMessage; private set => SetField(ref connectivityEmptyMessage, value); }
+    public string SpeedTestsEmptyMessage { get => speedTestsEmptyMessage; private set => SetField(ref speedTestsEmptyMessage, value); }
+    public string EventsEmptyMessage { get => eventsEmptyMessage; private set => SetField(ref eventsEmptyMessage, value); }
     public string SettingsValidation { get => settingsValidation; private set => SetField(ref settingsValidation, value); }
+
+    public int SelectedDetailTabIndex
+    {
+        get => selectedDetailTabIndex;
+        set => SetField(ref selectedDetailTabIndex, value);
+    }
 
     public int SelectedTabIndex
     {
@@ -266,6 +319,11 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         {
             if (SetField(ref selectedSession, value))
             {
+                if (value is not null)
+                {
+                    AddActivity($"Session selected: {value.Id}.");
+                }
+
                 RaiseState();
             }
         }
@@ -402,6 +460,11 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
                 AddActivity(result.Summary);
             });
             await RefreshHistoryAsync().ConfigureAwait(false);
+            Dispatch(() =>
+            {
+                SelectedSession = Sessions.FirstOrDefault(summary => summary.Id == result.Session.Id) ?? SelectedSession;
+                AddActivity($"Quick Test session selected for details: {result.Session.Id}.");
+            });
             return result;
         }
         catch (Exception ex)
@@ -448,13 +511,16 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
 
         Dispatch(() =>
         {
+            var previousSelectionId = SelectedSession?.Id;
             Sessions.Clear();
             foreach (var summary in summaries)
             {
                 Sessions.Add(summary);
             }
 
-            SelectedSession ??= Sessions.FirstOrDefault();
+            SelectedSession = previousSelectionId is null
+                ? Sessions.FirstOrDefault()
+                : Sessions.FirstOrDefault(session => session.Id == previousSelectionId) ?? Sessions.FirstOrDefault();
             AddActivity($"History refreshed: {Sessions.Count} session(s).");
         });
     }
@@ -467,32 +533,113 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
             return;
         }
 
-        var session = (await store.GetSessionsAsync(CancellationToken.None).ConfigureAwait(false)).FirstOrDefault(item => item.Id == SelectedSession.Id);
-        if (session is null)
-        {
-            Dispatch(() => { Feedback = "The selected session is no longer available."; });
-            await RefreshHistoryAsync().ConfigureAwait(false);
-            return;
-        }
-
-        var sessionMeasurements = await store.GetMeasurementsAsync(session.Id, CancellationToken.None).ConfigureAwait(false);
-        var sessionSpeeds = await store.GetSpeedTestsAsync(session.Id, CancellationToken.None).ConfigureAwait(false);
-        var events = await store.GetNetworkInterfaceEventsAsync(session.Id, CancellationToken.None).ConfigureAwait(false);
-        var markers = await store.GetManualMarkersAsync(session.Id, CancellationToken.None).ConfigureAwait(false);
+        var selectedSessionId = SelectedSession.Id;
+        detailLoadCancellation?.Cancel();
+        detailLoadCancellation?.Dispose();
+        detailLoadCancellation = new CancellationTokenSource();
+        var token = detailLoadCancellation.Token;
 
         Dispatch(() =>
         {
-            DetailMeasurements.ReplaceWith(sessionMeasurements);
-            DetailConnectivityMeasurements.ReplaceWith(sessionMeasurements.Where(measurement => measurement.Method is ProbeMethod.Dns or ProbeMethod.TcpConnect or ProbeMethod.Https));
-            DetailSpeedTests.ReplaceWith(sessionSpeeds);
-            DetailNetworkEvents.ReplaceWith(events);
-            DetailMarkers.ReplaceWith(markers);
-            DetailPacketLoss.ReplaceWith(PacketLossSummary.ByIcmpTarget(sessionMeasurements));
-            BuildCharts(sessionMeasurements, sessionSpeeds);
+            IsDetailLoading = true;
+            DetailStatus = $"Loading session details for {selectedSessionId}.";
+            DetailErrorSummary = "";
+            ClearDetailCollections();
             SelectedTabIndex = 2;
-            Feedback = $"Opened session {session.Id}.";
-            AddActivity($"Opened session {session.Id}.");
+            AddActivity($"Session detail load started: {selectedSessionId}.");
+            RaiseState();
         });
+
+        try
+        {
+            var sessions = await store.GetSessionsAsync(token).ConfigureAwait(false);
+            var session = sessions.FirstOrDefault(item => item.Id == selectedSessionId);
+            if (session is null)
+            {
+                Dispatch(() =>
+                {
+                    DetailStatus = "The selected session no longer exists.";
+                    DetailSummaryHeader = $"Missing session: {selectedSessionId}";
+                    Feedback = "The selected session no longer exists.";
+                    IsDetailLoading = false;
+                    AddActivity($"Session detail load failed: {selectedSessionId} not found.");
+                    RaiseState();
+                });
+                await RefreshHistoryAsync().ConfigureAwait(false);
+                return;
+            }
+
+            var sessionMeasurements = await store.GetMeasurementsAsync(session.Id, token).ConfigureAwait(false);
+            var sessionSpeeds = await store.GetSpeedTestsAsync(session.Id, token).ConfigureAwait(false);
+            var events = await store.GetNetworkInterfaceEventsAsync(session.Id, token).ConfigureAwait(false);
+            var markers = await store.GetManualMarkersAsync(session.Id, token).ConfigureAwait(false);
+            var detail = SessionDetailSnapshot.Create(session, sessionMeasurements, sessionSpeeds, events, markers);
+            token.ThrowIfCancellationRequested();
+
+            Dispatch(() =>
+            {
+                if (SelectedSession?.Id != selectedSessionId)
+                {
+                    AddActivity($"Session detail load discarded after selection changed: {selectedSessionId}.");
+                    return;
+                }
+
+                ApplySessionDetail(detail);
+                SelectedTabIndex = 2;
+                Feedback = $"Opened session {session.Id}.";
+                AddActivity($"Session detail load completed: {session.Id}; measurements={sessionMeasurements.Count}, speedTests={sessionSpeeds.Count}, events={events.Count}, markers={markers.Count}; charts latency={LatencyChartPoints.Count}, jitter={JitterChartPoints.Count}, packetLoss={PacketLossChartPoints.Count}, speed={SpeedChartPoints.Count}.");
+            });
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            Dispatch(() => AddActivity($"Session detail load canceled: {selectedSessionId}."));
+        }
+        catch (Exception ex)
+        {
+            Dispatch(() =>
+            {
+                DetailStatus = "Unable to load session details.";
+                DetailErrorSummary = $"{ex.GetType().Name}: {ex.Message}";
+                Feedback = "Unable to load session details.";
+                IsDetailLoading = false;
+                AddActivity($"Session detail repository error: {selectedSessionId} {ex.GetType().Name}.");
+                RaiseState();
+            });
+        }
+    }
+
+    public async Task RefreshSelectedSessionDetailsAsync()
+    {
+        if (SelectedSession is null)
+        {
+            return;
+        }
+
+        await OpenSelectedSessionAsync().ConfigureAwait(false);
+    }
+
+    public async Task OpenPreviousSessionAsync()
+    {
+        if (SelectedSession is null || Sessions.Count == 0)
+        {
+            return;
+        }
+
+        var index = Sessions.IndexOf(SelectedSession);
+        SelectedSession = Sessions[Math.Max(0, index - 1)];
+        await OpenSelectedSessionAsync().ConfigureAwait(false);
+    }
+
+    public async Task OpenNextSessionAsync()
+    {
+        if (SelectedSession is null || Sessions.Count == 0)
+        {
+            return;
+        }
+
+        var index = Sessions.IndexOf(SelectedSession);
+        SelectedSession = Sessions[Math.Min(Sessions.Count - 1, index + 1)];
+        await OpenSelectedSessionAsync().ConfigureAwait(false);
     }
 
     public async Task DeleteSelectedSessionAsync()
@@ -512,6 +659,9 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         {
             AddActivity($"Deleted session {SelectedSession.Id}.");
             SelectedSession = null;
+            ClearDetailCollections();
+            DetailStatus = "The selected session was deleted.";
+            DetailSummaryHeader = "No session loaded.";
         });
         await RefreshHistoryAsync().ConfigureAwait(false);
     }
@@ -663,6 +813,40 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         System.Windows.Clipboard.SetText($"DQOPR NetPulse {Version}{Environment.NewLine}{RuntimeInfo}{Environment.NewLine}Database: {settings.DatabasePath}");
         Feedback = "Diagnostic information copied.";
         return Task.CompletedTask;
+    }
+
+    private Task CopySessionIdAsync()
+    {
+        if (SelectedSession is not null)
+        {
+            System.Windows.Clipboard.SetText(SelectedSession.Id.ToString());
+            Feedback = "Session ID copied.";
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private Task CopyTimelineRowsAsync()
+    {
+        System.Windows.Clipboard.SetText(TimelineCsv(DetailTimelineRows));
+        Feedback = $"Copied {DetailTimelineRows.Count} timeline row(s).";
+        return Task.CompletedTask;
+    }
+
+    private async Task ExportTimelineCsvAsync()
+    {
+        if (loadedDetailSessionId is null)
+        {
+            Feedback = "No session details loaded.";
+            return;
+        }
+
+        var outputDirectory = string.IsNullOrWhiteSpace(ExportDirectory) ? settings.ExportDirectory : ExportDirectory;
+        Directory.CreateDirectory(outputDirectory);
+        var path = Path.Combine(outputDirectory, $"netpulse-timeline-{loadedDetailSessionId:N}.csv");
+        await File.WriteAllTextAsync(path, TimelineCsv(DetailTimelineRows)).ConfigureAwait(false);
+        LastGeneratedFile = path;
+        Feedback = $"Timeline CSV exported: {path}";
     }
 
     private Task CopyAllActivityAsync()
@@ -833,29 +1017,101 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         PacketLossChartPoints.Clear();
         SpeedChartPoints.Clear();
 
-        var latency = sessionMeasurements.Where(item => item is { Method: ProbeMethod.Icmp, Succeeded: true, LatencyMilliseconds: not null } && !IsGateway(item)).TakeLast(80).ToArray();
+        var latency = Downsample(sessionMeasurements.Where(item => item is { Method: ProbeMethod.Icmp, Succeeded: true, LatencyMilliseconds: not null }), 160).ToArray();
         for (var index = 0; index < latency.Length; index++)
         {
             LatencyChartPoints.Add(new System.Windows.Point(index * 6, 120 - Math.Min(115, latency[index].LatencyMilliseconds!.Value)));
         }
 
-        var jitterValues = JitterCalculator.MeanAbsoluteDifferenceBySeries(sessionMeasurements).Values.Where(value => !double.IsNaN(value)).Take(80).ToArray();
+        var jitterValues = Downsample(JitterCalculator.MeanAbsoluteDifferenceBySeries(sessionMeasurements).Where(item => !item.Key.TargetName.Equals("Local Gateway", StringComparison.OrdinalIgnoreCase)).Select(item => item.Value).Where(value => !double.IsNaN(value)), 160).ToArray();
         for (var index = 0; index < jitterValues.Length; index++)
         {
             JitterChartPoints.Add(new System.Windows.Point(index * 6, 120 - Math.Min(115, jitterValues[index])));
         }
 
-        var lossValues = PacketLossSummary.ByIcmpTarget(sessionMeasurements).ToArray();
+        var lossValues = Downsample(PacketLossSummary.ByIcmpTarget(sessionMeasurements), 160).ToArray();
         for (var index = 0; index < lossValues.Length; index++)
         {
             PacketLossChartPoints.Add(new System.Windows.Point(index * 40, 120 - Math.Min(115, lossValues[index].LossPercent)));
         }
 
-        var speeds = sessionSpeeds.Where(IsDisplayableSpeed).TakeLast(80).ToArray();
+        var speeds = Downsample(sessionSpeeds.Where(speed => speed.MethodologyVersion == MeasurementMethodology.CurrentVersion && (IsDisplayableSpeed(speed) || speed.ResultStatus == SpeedResultStatus.LegacyEstimate)), 160).ToArray();
         for (var index = 0; index < speeds.Length; index++)
         {
-            SpeedChartPoints.Add(new System.Windows.Point(index * 12, 120 - Math.Min(115, speeds[index].MegabitsPerSecond!.Value)));
+            if (speeds[index].MegabitsPerSecond is not null)
+            {
+                SpeedChartPoints.Add(new System.Windows.Point(index * 12, 120 - Math.Min(115, speeds[index].MegabitsPerSecond!.Value)));
+                continue;
+            }
+
+            SpeedChartPoints.Add(new System.Windows.Point(index * 12, 118));
         }
+
+        OnPropertyChanged(nameof(LatencyChartCount));
+        OnPropertyChanged(nameof(JitterChartCount));
+        OnPropertyChanged(nameof(PacketLossChartCount));
+        OnPropertyChanged(nameof(SpeedChartCount));
+    }
+
+    public int LatencyChartCount => LatencyChartPoints.Count;
+
+    public int JitterChartCount => JitterChartPoints.Count;
+
+    public int PacketLossChartCount => PacketLossChartPoints.Count;
+
+    public int SpeedChartCount => SpeedChartPoints.Count;
+
+    private void ApplySessionDetail(SessionDetailSnapshot detail)
+    {
+        DetailMeasurements.ReplaceWith(detail.Measurements);
+        DetailConnectivityMeasurements.ReplaceWith(detail.Measurements.Where(measurement => measurement.Method is ProbeMethod.Dns or ProbeMethod.TcpConnect or ProbeMethod.Https));
+        DetailSpeedTests.ReplaceWith(detail.SpeedTests);
+        DetailNetworkEvents.ReplaceWith(detail.Events);
+        DetailMarkers.ReplaceWith(detail.Markers);
+        DetailPacketLoss.ReplaceWith(PacketLossSummary.ByIcmpTarget(detail.Measurements));
+        DetailTimelineRows.ReplaceWith(detail.TimelineRows);
+        DetailIcmpSummaryRows.ReplaceWith(detail.IcmpSummaryRows);
+        DetailIcmpRows.ReplaceWith(detail.IcmpRows);
+        DetailConnectivityRows.ReplaceWith(detail.ConnectivityRows);
+        DetailSpeedTestRows.ReplaceWith(detail.SpeedTestRows);
+        DetailEventRows.ReplaceWith(detail.EventRows);
+        BuildCharts(detail.Measurements, detail.SpeedTests);
+        loadedDetailSessionId = detail.Session.Id;
+        DetailSummaryHeader = detail.SummaryHeader;
+        TimelineEmptyMessage = detail.TimelineRows.Count == 0 ? "No probe measurements were recorded for this session." : "";
+        IcmpEmptyMessage = detail.IcmpRows.Count == 0 ? "No ICMP measurements were recorded for this session." : "";
+        ConnectivityEmptyMessage = detail.ConnectivityRows.Count == 0 ? "No DNS, TCP, or HTTPS measurements were recorded for this session." : "";
+        SpeedTestsEmptyMessage = detail.SpeedTestRows.Count == 0 ? "No speed-test rows were recorded for this session." : "";
+        EventsEmptyMessage = detail.EventRows.Count == 0 ? "No events or markers were recorded for this session." : "";
+        DetailStatus = $"Loaded {detail.TimelineRows.Count} timeline row(s), {detail.IcmpSummaryRows.Count} ICMP group(s), {detail.ConnectivityRows.Count} connectivity row(s), {detail.SpeedTestRows.Count} speed row(s), and {detail.EventRows.Count} event/marker row(s).";
+        DetailErrorSummary = "";
+        IsDetailLoading = false;
+        RaiseState();
+    }
+
+    private void ClearDetailCollections()
+    {
+        DetailMeasurements.Clear();
+        DetailConnectivityMeasurements.Clear();
+        DetailSpeedTests.Clear();
+        DetailNetworkEvents.Clear();
+        DetailMarkers.Clear();
+        DetailPacketLoss.Clear();
+        DetailTimelineRows.Clear();
+        DetailIcmpSummaryRows.Clear();
+        DetailIcmpRows.Clear();
+        DetailConnectivityRows.Clear();
+        DetailSpeedTestRows.Clear();
+        DetailEventRows.Clear();
+        LatencyChartPoints.Clear();
+        JitterChartPoints.Clear();
+        PacketLossChartPoints.Clear();
+        SpeedChartPoints.Clear();
+        loadedDetailSessionId = null;
+        OnPropertyChanged(nameof(LatencyChartCount));
+        OnPropertyChanged(nameof(JitterChartCount));
+        OnPropertyChanged(nameof(PacketLossChartCount));
+        OnPropertyChanged(nameof(SpeedChartCount));
     }
 
     private MonitoringTargets BuildTargets(ApplicationSettings currentSettings)
@@ -906,6 +1162,9 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
             : statistics.MedianRttMilliseconds < 1
                 ? "<1 ms"
                 : $"{statistics.MedianRttMilliseconds:0.0} ms";
+
+    private static string FormatLatency(double? value)
+        => value is null ? "n/a" : value < 1 ? "<1 ms" : $"{value:0.0}";
 
     internal static bool IsDisplayableSpeed(SpeedTestMeasurement speedTest)
         => speedTest is { Succeeded: true, MegabitsPerSecond: not null }
@@ -971,6 +1230,53 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         return ordered.Length % 2 == 0 ? (ordered[mid - 1] + ordered[mid]) / 2.0 : ordered[mid];
     }
 
+    private static IEnumerable<T> Downsample<T>(IEnumerable<T> values, int maximumPoints)
+    {
+        var array = values.ToArray();
+        if (array.Length <= maximumPoints || maximumPoints <= 0)
+        {
+            return array;
+        }
+
+        var result = new List<T>(maximumPoints);
+        var step = (array.Length - 1) / (double)(maximumPoints - 1);
+        for (var index = 0; index < maximumPoints; index++)
+        {
+            result.Add(array[(int)Math.Round(index * step)]);
+        }
+
+        return result;
+    }
+
+    private static string TimelineCsv(IEnumerable<SessionTimelineRow> rows)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("Time local,Time UTC,Method,Target,Host,Address family,Sequence,Result,Latency ms,Failure category,Message,Probe stream ID,Methodology version");
+        foreach (var row in rows)
+        {
+            builder.Append(Csv(row.TimeLocal)).Append(',')
+                .Append(Csv(row.TimeUtc)).Append(',')
+                .Append(Csv(row.Method)).Append(',')
+                .Append(Csv(row.Target)).Append(',')
+                .Append(Csv(row.Host)).Append(',')
+                .Append(Csv(row.AddressFamily)).Append(',')
+                .Append(Csv(row.Sequence)).Append(',')
+                .Append(Csv(row.Result)).Append(',')
+                .Append(Csv(row.LatencyMilliseconds)).Append(',')
+                .Append(Csv(row.FailureCategory)).Append(',')
+                .Append(Csv(row.Message)).Append(',')
+                .Append(Csv(row.ProbeStreamId)).Append(',')
+                .Append(Csv(row.MethodologyVersion)).AppendLine();
+        }
+
+        return builder.ToString();
+    }
+
+    private static string Csv(string value)
+        => value.Contains('"', StringComparison.Ordinal) || value.Contains(',', StringComparison.Ordinal) || value.Contains('\n', StringComparison.Ordinal)
+            ? $"\"{value.Replace("\"", "\"\"", StringComparison.Ordinal)}\""
+            : value;
+
     private ICommand NavigationCommand(int tabIndex) => new RelayCommand(() => { SelectedTabIndex = tabIndex; return Task.CompletedTask; });
 
     private Task OpenUrlAsync(string url)
@@ -998,7 +1304,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(IsMonitoring));
         OnPropertyChanged(nameof(IsPaused));
         OnPropertyChanged(nameof(IsQuickTestRunning));
-        foreach (var command in new[] { StartCommand, PauseCommand, ResumeCommand, StopCommand, QuickTestCommand, MarkerCommand, OpenSessionCommand, DeleteSelectedSessionCommand, ExportCurrentSessionCommand, ExportCsvCommand, ExportJsonCommand, GenerateHtmlReportCommand, OpenLastExportCommand, SaveReferenceResultCommand })
+        foreach (var command in new[] { StartCommand, PauseCommand, ResumeCommand, StopCommand, QuickTestCommand, MarkerCommand, OpenSessionCommand, RefreshDetailsCommand, PreviousSessionCommand, NextSessionCommand, DeleteSelectedSessionCommand, ExportCurrentSessionCommand, ExportCsvCommand, ExportJsonCommand, GenerateHtmlReportCommand, OpenLastExportCommand, CopySessionIdCommand, CopyTimelineRowsCommand, ExportTimelineCsvCommand, SaveReferenceResultCommand })
         {
             ((RelayCommand)command).RaiseCanExecuteChanged();
         }
@@ -1079,6 +1385,335 @@ public sealed record SessionSummaryViewModel(
 
     private static bool IsGateway(ProbeMeasurement measurement)
         => string.Equals(measurement.TargetName, "Local Gateway", StringComparison.OrdinalIgnoreCase);
+}
+
+public sealed record SessionTimelineRow(
+    string TimeLocal,
+    string TimeUtc,
+    string Method,
+    string Target,
+    string Host,
+    string AddressFamily,
+    string Sequence,
+    string Result,
+    string LatencyMilliseconds,
+    string FailureCategory,
+    string Message,
+    string ProbeStreamId,
+    string MethodologyVersion)
+{
+    public static SessionTimelineRow From(ProbeMeasurement measurement)
+        => new(
+            FormatLocal(measurement.ObservedAt),
+            measurement.ObservedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture),
+            measurement.Method.ToString(),
+            measurement.TargetName,
+            ValueOrNa(measurement.TargetHost),
+            ValueOrNa(measurement.AddressFamily),
+            measurement.Sequence?.ToString(CultureInfo.InvariantCulture) ?? "n/a",
+            measurement.Succeeded ? "Success" : "Failure",
+            FormatLatency(measurement.LatencyMilliseconds),
+            ValueOrNa(measurement.FailureCategory),
+            ValueOrNa(measurement.FailureMessage),
+            ValueOrNa(measurement.ProbeStreamId),
+            measurement.MethodologyVersion);
+
+    private static string FormatLatency(double? value)
+        => value is null ? "n/a" : value < 1 ? "<1 ms" : value.Value.ToString("0.0", CultureInfo.InvariantCulture);
+
+    private static string FormatLocal(DateTimeOffset value)
+        => value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture);
+
+    private static string ValueOrNa(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "n/a" : value;
+}
+
+public sealed record IcmpPacketLossDetailRow(
+    string Target,
+    string Host,
+    string AddressFamily,
+    string ProbeStreamId,
+    int TotalProbes,
+    int SuccessfulProbes,
+    int FailedProbes,
+    string PacketLossPercent,
+    string MinimumRtt,
+    string MedianRtt,
+    string MeanRtt,
+    string P95Rtt,
+    string MaximumRtt,
+    string Jitter,
+    string FirstSampleLocal,
+    string LastSampleLocal)
+{
+    public static IReadOnlyList<IcmpPacketLossDetailRow> From(IReadOnlyList<ProbeMeasurement> measurements)
+        => measurements
+            .Where(measurement => measurement.Method == ProbeMethod.Icmp)
+            .GroupBy(measurement => new
+            {
+                measurement.TargetName,
+                Host = measurement.TargetHost ?? "",
+                Family = measurement.AddressFamily ?? "",
+                Stream = measurement.ProbeStreamId ?? ""
+            })
+            .OrderBy(group => group.Key.TargetName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(group => group.Key.Host, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var rows = group.OrderBy(row => row.ObservedAt).ToArray();
+                var stats = JitterCalculator.CalculateIcmpStatistics(rows, LatencySeriesKey.From(rows[0]));
+                var total = rows.Length;
+                var succeeded = rows.Count(row => row.Succeeded);
+                var failed = total - succeeded;
+                return new IcmpPacketLossDetailRow(
+                    group.Key.TargetName,
+                    ValueOrNa(group.Key.Host),
+                    ValueOrNa(group.Key.Family),
+                    ValueOrNa(group.Key.Stream),
+                    total,
+                    succeeded,
+                    failed,
+                    total == 0 ? "n/a" : $"{failed * 100.0 / total:0.0}%",
+                    FormatLatency(stats.MinimumRttMilliseconds),
+                    FormatLatency(stats.MedianRttMilliseconds),
+                    FormatLatency(stats.MeanRttMilliseconds),
+                    FormatLatency(stats.P95RttMilliseconds),
+                    FormatLatency(stats.MaximumRttMilliseconds),
+                    stats.MeanAbsoluteSuccessiveDifferenceMilliseconds is null ? "Insufficient samples" : FormatLatency(stats.MeanAbsoluteSuccessiveDifferenceMilliseconds),
+                    FormatLocal(rows.First().ObservedAt),
+                    FormatLocal(rows.Last().ObservedAt));
+            })
+            .ToArray();
+
+    private static string FormatLatency(double? value)
+        => value is null ? "n/a" : value < 1 ? "<1 ms" : $"{value:0.0} ms";
+
+    private static string FormatLocal(DateTimeOffset value)
+        => value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture);
+
+    private static string ValueOrNa(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "n/a" : value;
+}
+
+public sealed record IcmpRawRow(
+    string TimeLocal,
+    string Target,
+    string Host,
+    string AddressFamily,
+    string Sequence,
+    string Result,
+    string Rtt,
+    string Failure,
+    string Message,
+    string ProbeStreamId)
+{
+    public static IcmpRawRow From(ProbeMeasurement measurement)
+        => new(
+            measurement.ObservedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture),
+            measurement.TargetName,
+            ValueOrNa(measurement.TargetHost),
+            ValueOrNa(measurement.AddressFamily),
+            measurement.Sequence?.ToString(CultureInfo.InvariantCulture) ?? "n/a",
+            measurement.Succeeded ? "Success" : "Failure",
+            FormatLatency(measurement.LatencyMilliseconds),
+            ValueOrNa(measurement.FailureCategory),
+            ValueOrNa(measurement.FailureMessage),
+            ValueOrNa(measurement.ProbeStreamId));
+
+    private static string FormatLatency(double? value)
+        => value is null ? "n/a" : value < 1 ? "<1 ms" : $"{value:0.0} ms";
+
+    private static string ValueOrNa(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "n/a" : value;
+}
+
+public sealed record ConnectivityDetailRow(
+    string TimeLocal,
+    string Method,
+    string Target,
+    string Host,
+    string AddressFamily,
+    string Result,
+    string ResponseTime,
+    string FailureCategory,
+    string Message,
+    string MethodologyVersion)
+{
+    public static ConnectivityDetailRow From(ProbeMeasurement measurement)
+        => new(
+            measurement.ObservedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture),
+            measurement.Method.ToString(),
+            measurement.TargetName,
+            ValueOrNa(measurement.TargetHost),
+            ValueOrNa(measurement.AddressFamily),
+            measurement.Succeeded ? "Success" : "Failure",
+            FormatLatency(measurement.LatencyMilliseconds),
+            ValueOrNa(measurement.FailureCategory),
+            ValueOrNa(measurement.FailureMessage),
+            measurement.MethodologyVersion);
+
+    private static string FormatLatency(double? value)
+        => value is null ? "n/a" : value < 1 ? "<1 ms" : $"{value:0.0} ms";
+
+    private static string ValueOrNa(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "n/a" : value;
+}
+
+public sealed record SpeedTestDetailRow(
+    string Direction,
+    string ResultStatus,
+    string MegabitsPerSecond,
+    string Provider,
+    string Endpoint,
+    string StartLocal,
+    string Duration,
+    long BytesTransferred,
+    int StreamCount,
+    string HttpVersion,
+    string SetupDuration,
+    string WarmupDuration,
+    string FailureCategory,
+    string FailureMessage,
+    string ConfidenceFlags,
+    string MethodologyVersion)
+{
+    public static SpeedTestDetailRow From(SpeedTestMeasurement speed)
+        => new(
+            speed.Direction,
+            speed.ResultStatus == SpeedResultStatus.MeasurementAccountingInconsistency ? "Invalid" : speed.ResultStatus,
+            speed.MegabitsPerSecond is null ? "n/a" : $"{speed.MegabitsPerSecond:0.0}",
+            speed.Provider,
+            ValueOrNa(speed.Endpoint),
+            speed.ObservedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture),
+            speed.ActiveDuration.ToString(@"hh\:mm\:ss\.fff", CultureInfo.InvariantCulture),
+            speed.BytesTransferred,
+            speed.ParallelStreamCount,
+            ValueOrNa(speed.HttpVersion),
+            speed.SetupDuration is null ? "n/a" : $"{speed.SetupDuration.Value.TotalMilliseconds:0.0} ms",
+            speed.WarmupDuration is null ? "n/a" : $"{speed.WarmupDuration.Value.TotalMilliseconds:0.0} ms",
+            ValueOrNa(speed.FailureCategory),
+            ValueOrNa(speed.FailureMessage),
+            ParseConfidenceFlags(speed.DiagnosticJson),
+            speed.ResultStatus == SpeedResultStatus.LegacyEstimate ? $"Legacy estimate ({speed.MethodologyVersion})" : speed.MethodologyVersion);
+
+    private static string ParseConfidenceFlags(string? diagnosticJson)
+    {
+        if (string.IsNullOrWhiteSpace(diagnosticJson))
+        {
+            return "n/a";
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(diagnosticJson);
+            if (!document.RootElement.TryGetProperty("confidence", out var confidence))
+            {
+                return "n/a";
+            }
+
+            var parts = new List<string>();
+            foreach (var name in new[] { "AllStreamsActive", "AllResponsesSuccessful", "MinimumTransferredDataMet", "EarlyCompletion", "LikelyFlowControlOrCompletionStall", "SuspectedEndpointLimitation" })
+            {
+                if (confidence.TryGetProperty(name, out var value))
+                {
+                    parts.Add($"{name}={value}");
+                }
+            }
+
+            return parts.Count == 0 ? "n/a" : string.Join("; ", parts);
+        }
+        catch (JsonException)
+        {
+            return "Diagnostic JSON unreadable";
+        }
+    }
+
+    private static string ValueOrNa(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "n/a" : value;
+}
+
+public sealed record SessionEventDetailRow(
+    string TimeLocal,
+    string EventType,
+    string Severity,
+    string Interface,
+    string Gateway,
+    string Description,
+    string RelatedTarget,
+    string RelatedId)
+{
+    public static SessionEventDetailRow From(NetworkInterfaceEvent item)
+        => new(
+            item.ObservedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture),
+            item.EventType,
+            "Info",
+            ValueOrNa(item.InterfaceName),
+            ValueOrNa(item.Gateway),
+            ValueOrNa(item.Details),
+            "n/a",
+            item.SessionId.ToString());
+
+    public static SessionEventDetailRow From(ManualMarker item)
+        => new(
+            item.ObservedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture),
+            "Manual marker",
+            "User",
+            "n/a",
+            "n/a",
+            item.Note,
+            "n/a",
+            item.Id.ToString());
+
+    private static string ValueOrNa(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "n/a" : value;
+}
+
+internal sealed record SessionDetailSnapshot(
+    MonitoringSession Session,
+    IReadOnlyList<ProbeMeasurement> Measurements,
+    IReadOnlyList<SpeedTestMeasurement> SpeedTests,
+    IReadOnlyList<NetworkInterfaceEvent> Events,
+    IReadOnlyList<ManualMarker> Markers,
+    IReadOnlyList<SessionTimelineRow> TimelineRows,
+    IReadOnlyList<IcmpPacketLossDetailRow> IcmpSummaryRows,
+    IReadOnlyList<IcmpRawRow> IcmpRows,
+    IReadOnlyList<ConnectivityDetailRow> ConnectivityRows,
+    IReadOnlyList<SpeedTestDetailRow> SpeedTestRows,
+    IReadOnlyList<SessionEventDetailRow> EventRows,
+    string SummaryHeader)
+{
+    public static SessionDetailSnapshot Create(
+        MonitoringSession session,
+        IReadOnlyList<ProbeMeasurement> measurements,
+        IReadOnlyList<SpeedTestMeasurement> speedTests,
+        IReadOnlyList<NetworkInterfaceEvent> events,
+        IReadOnlyList<ManualMarker> markers)
+    {
+        var orderedMeasurements = measurements.OrderBy(item => item.ObservedAt).ToArray();
+        var orderedSpeeds = speedTests.OrderBy(item => item.ObservedAt).ToArray();
+        var orderedEvents = events.OrderBy(item => item.ObservedAt).ToArray();
+        var orderedMarkers = markers.OrderBy(item => item.ObservedAt).ToArray();
+        var latestEvent = orderedEvents.LastOrDefault();
+        var sessionType = session.ProfileName.Contains("quick", StringComparison.OrdinalIgnoreCase) ? "Quick Test" : "Continuous Monitoring";
+        var summary = $"Session {session.Id} | {sessionType} | {session.Status} | Start {FormatLocal(session.StartedAt)} | End {(session.EndedAt is null ? "n/a" : FormatLocal(session.EndedAt.Value))} | Duration {session.ActiveDuration:hh\\:mm\\:ss} | Interface {latestEvent?.InterfaceName ?? "Unknown"} | Gateway {latestEvent?.Gateway ?? "Unknown"} | Methodology {session.MethodologyVersion} | Measurements {orderedMeasurements.Length} | Speed tests {orderedSpeeds.Length} | Markers {orderedMarkers.Length} | Incidents 0";
+
+        return new SessionDetailSnapshot(
+            session,
+            orderedMeasurements,
+            orderedSpeeds,
+            orderedEvents,
+            orderedMarkers,
+            orderedMeasurements.Select(SessionTimelineRow.From).ToArray(),
+            IcmpPacketLossDetailRow.From(orderedMeasurements),
+            orderedMeasurements.Where(item => item.Method == ProbeMethod.Icmp).Select(IcmpRawRow.From).ToArray(),
+            orderedMeasurements.Where(item => item.Method is ProbeMethod.Dns or ProbeMethod.TcpConnect or ProbeMethod.Https).Select(ConnectivityDetailRow.From).ToArray(),
+            orderedSpeeds.Select(SpeedTestDetailRow.From).ToArray(),
+            orderedEvents.Select(SessionEventDetailRow.From).Concat(orderedMarkers.Select(SessionEventDetailRow.From)).OrderBy(item => item.TimeLocal, StringComparer.Ordinal).ToArray(),
+            summary);
+    }
+
+    private static string FormatLocal(DateTimeOffset value)
+        => value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture);
 }
 
 internal static class ObservableExtensions

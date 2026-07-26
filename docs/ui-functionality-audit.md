@@ -2,7 +2,7 @@
 
 Branch: `csharp-rewrite`
 
-Version audited: `0.3.0-alpha.4`
+Version audited: `0.3.0-alpha.5`
 
 Primary source file: `src/DQOPR.NetPulse.App/MainWindow.xaml`
 

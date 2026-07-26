@@ -8,6 +8,11 @@ The format is based on Keep a Changelog, and this project uses semantic versioni
 
 ### Added
 
+- C# Session Details reliability milestone `0.3.0-alpha.5`.
+- Session Details audit documenting selected-session propagation, SQLite repository calls, populated collections, chart generation, bindings, and diagnostics.
+- Cancellable exact-session details loading with loading, missing-session, empty-category, and repository-error states.
+- Evidence tables for Timeline, ICMP packet loss/raw ICMP, DNS/TCP/HTTPS, speed tests with confidence flags, and events/markers.
+- Expanded Windows smoke validation and screenshots for Session Details summary, timeline, ICMP, connectivity, speed tests, and events/markers.
 - C# measurement-correctness milestone `0.3.0-alpha.4`.
 - Forensic measurement audit documenting latency, jitter, packet-loss, throughput, persistence, export, and history semantics.
 - Scoped dashboard cards for router latency, internet latency, internet jitter, and ICMP packet loss with target attribution.
@@ -32,6 +37,9 @@ The format is based on Keep a Changelog, and this project uses semantic versioni
 
 ### Fixed
 
+- Fixed Session Details Timeline binding to only DNS/TCP/HTTPS rows instead of all probe measurements.
+- Fixed Quick Test history selection so opening details targets the just-created Quick Test session.
+- Fixed Session Details showing blank panels without explaining empty data, load failures, or missing sessions.
 - Fixed dashboard latency mixing ICMP, DNS, TCP connect, and HTTPS durations.
 - Fixed jitter calculations that could compare incompatible probe streams or stale samples from previous quick tests.
 - Fixed history average/max latency aggregating DNS/TCP/HTTPS durations as if they were ICMP RTT.

@@ -1,6 +1,6 @@
 # Measurement Correctness Audit
 
-Version audited: `0.3.0-alpha.4`
+Version audited: `0.3.0-alpha.5`
 
 Branch: `csharp-rewrite`
 

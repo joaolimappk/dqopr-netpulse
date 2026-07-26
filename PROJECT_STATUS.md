@@ -2,7 +2,7 @@
 
 Branch: `csharp-rewrite`
 
-Version: `0.3.0-alpha.4`
+Version: `0.3.0-alpha.5`
 
 ## Completed
 
@@ -23,11 +23,13 @@ Version: `0.3.0-alpha.4`
 - Added implemented C# WPF pages for Dashboard, History, Session Details, Reports, Settings, Activity Log, and About.
 - Added CSV export, standalone HTML report generation, persisted settings, manual markers, session deletion, UI command audit, and expanded smoke screenshot coverage.
 - Added measurement-correctness audit, scoped dashboard latency/jitter cards, status-aware speed display, local-time UI/export fields, diagnostic bundle export, and manual external reference-result comparison.
+- Added Session Details audit, cancellable exact-session details loading, populated evidence tables, empty/error states, details chart counts, and expanded details smoke assertions/screenshots.
 
 ## In Progress
 
 - Hardening production probe behavior across varied Windows networks.
 - Upload under-reporting investigation after the first real attended Windows comparison.
+- Real attended Windows validation of the Session Details alpha.5 fixes.
 
 ## Implemented But Unverified
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dqopr-netpulse"
-version = "0.3.0-alpha.4"
+version = "0.3.0-alpha.5"
 description = "Internet Quality Monitor and ISP Evidence Reporter"
 readme = "README.md"
 requires-python = ">=3.12"

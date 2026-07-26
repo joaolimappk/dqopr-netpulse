@@ -204,120 +204,186 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="20">
                         <GroupBox Header="Session metadata">
-                            <UniformGrid Columns="4" Margin="8">
-                                <TextBlock Text="{Binding SelectedSession.Id, StringFormat=Session: {0}}" />
-                                <TextBlock Text="{Binding SelectedSession.Status, StringFormat=Status: {0}}" />
-                                <TextBlock Text="{Binding SelectedSession.Start, StringFormat=Start local: {0}}" />
-                                <TextBlock Text="{Binding SelectedSession.Duration, StringFormat=Duration: {0}}" />
-                            </UniformGrid>
+                            <StackPanel Margin="8">
+                                <TextBlock AutomationProperties.AutomationId="DetailSummaryHeader" FontWeight="SemiBold" Text="{Binding DetailSummaryHeader}" TextWrapping="Wrap" />
+                                <TextBlock AutomationProperties.AutomationId="DetailStatusText" Margin="0,8,0,0" Text="{Binding DetailStatus}" TextWrapping="Wrap" />
+                                <TextBlock Margin="0,4,0,0" Foreground="#B91C1C" Text="{Binding DetailErrorSummary}" TextWrapping="Wrap" />
+                                <StackPanel Margin="0,10,0,0" Orientation="Horizontal">
+                                    <Button Width="120" Margin="0,0,8,0" Command="{Binding ShowHistoryCommand}" Content="Back to History" />
+                                    <Button Width="110" Margin="0,0,8,0" Command="{Binding PreviousSessionCommand}" Content="Previous" />
+                                    <Button Width="110" Margin="0,0,8,0" Command="{Binding NextSessionCommand}" Content="Next" />
+                                    <Button Width="110" Margin="0,0,8,0" Command="{Binding RefreshDetailsCommand}" Content="Refresh" />
+                                    <Button Width="120" Margin="0,0,8,0" Command="{Binding CopySessionIdCommand}" Content="Copy ID" />
+                                    <Button Width="130" Margin="0,0,8,0" Command="{Binding ExportCurrentSessionCommand}" Content="Export Session" />
+                                    <Button Width="160" Margin="0,0,8,0" Command="{Binding GenerateHtmlReportCommand}" Content="Generate HTML" />
+                                    <Button Width="120" Command="{Binding DeleteSelectedSessionCommand}" Content="Delete" />
+                                </StackPanel>
+                            </StackPanel>
                         </GroupBox>
 
                         <UniformGrid Columns="2" Margin="0,14,0,0">
                             <GroupBox Header="Latency over time" Margin="0,0,8,8">
-                                <Canvas Height="130" Background="#FFFFFF">
-                                    <Polyline Points="{Binding LatencyChartPoints}" Stroke="#0B6B6B" StrokeThickness="2" />
-                                </Canvas>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Bottom" Margin="8,4" Text="{Binding LatencyChartCount, StringFormat=Points: {0}}" />
+                                    <Canvas Height="130" Background="#FFFFFF">
+                                        <Polyline Points="{Binding LatencyChartPoints}" Stroke="#0B6B6B" StrokeThickness="2" />
+                                    </Canvas>
+                                </DockPanel>
                             </GroupBox>
                             <GroupBox Header="Jitter over time" Margin="8,0,0,8">
-                                <Canvas Height="130" Background="#FFFFFF">
-                                    <Polyline Points="{Binding JitterChartPoints}" Stroke="#6246EA" StrokeThickness="2" />
-                                </Canvas>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Bottom" Margin="8,4" Text="{Binding JitterChartCount, StringFormat=Points: {0}}" />
+                                    <Canvas Height="130" Background="#FFFFFF">
+                                        <Polyline Points="{Binding JitterChartPoints}" Stroke="#6246EA" StrokeThickness="2" />
+                                    </Canvas>
+                                </DockPanel>
                             </GroupBox>
                             <GroupBox Header="Packet loss over time" Margin="0,8,8,8">
-                                <Canvas Height="130" Background="#FFFFFF">
-                                    <Polyline Points="{Binding PacketLossChartPoints}" Stroke="#C2410C" StrokeThickness="2" />
-                                </Canvas>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Bottom" Margin="8,4" Text="{Binding PacketLossChartCount, StringFormat=Points: {0}}" />
+                                    <Canvas Height="130" Background="#FFFFFF">
+                                        <Polyline Points="{Binding PacketLossChartPoints}" Stroke="#C2410C" StrokeThickness="2" />
+                                    </Canvas>
+                                </DockPanel>
                             </GroupBox>
                             <GroupBox Header="Download/upload over time" Margin="8,8,0,8">
-                                <Canvas Height="130" Background="#FFFFFF">
-                                    <Polyline Points="{Binding SpeedChartPoints}" Stroke="#166534" StrokeThickness="2" />
-                                </Canvas>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Bottom" Margin="8,4" Text="{Binding SpeedChartCount, StringFormat=Points: {0}}" />
+                                    <Canvas Height="130" Background="#FFFFFF">
+                                        <Polyline Points="{Binding SpeedChartPoints}" Stroke="#166534" StrokeThickness="2" />
+                                    </Canvas>
+                                </DockPanel>
                             </GroupBox>
                         </UniformGrid>
 
-                        <TabControl Margin="0,12,0,0">
+                        <TabControl AutomationProperties.AutomationId="SessionDetailsTabs" Margin="0,12,0,0" SelectedIndex="{Binding SelectedDetailTabIndex}">
                             <TabItem Header="Timeline">
-                                <DataGrid ItemsSource="{Binding DetailConnectivityMeasurements}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MinHeight="220">
-                                    <DataGrid.Columns>
-                                        <DataGridTextColumn Header="Time (local)" Binding="{Binding ObservedAt.LocalDateTime}" Width="160" />
-                                        <DataGridTextColumn Header="Method" Binding="{Binding Method}" Width="100" />
-                                        <DataGridTextColumn Header="Target" Binding="{Binding TargetName}" Width="170" />
-                                        <DataGridTextColumn Header="Host" Binding="{Binding TargetHost}" Width="140" />
-                                        <DataGridTextColumn Header="Family" Binding="{Binding AddressFamily}" Width="80" />
-                                        <DataGridTextColumn Header="Seq" Binding="{Binding Sequence}" Width="55" />
-                                        <DataGridTextColumn Header="Result" Binding="{Binding Succeeded}" Width="90" />
-                                        <DataGridTextColumn Header="Latency ms" Binding="{Binding LatencyMilliseconds}" Width="95" />
-                                        <DataGridTextColumn Header="Failure" Binding="{Binding FailureCategory}" Width="130" />
-                                        <DataGridTextColumn Header="Message" Binding="{Binding FailureMessage}" Width="*" />
-                                    </DataGrid.Columns>
-                                </DataGrid>
+                                <DockPanel>
+                                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                                        <Button Width="130" Margin="0,0,8,0" Command="{Binding CopyTimelineRowsCommand}" Content="Copy all rows" />
+                                        <Button Width="150" Margin="0,0,8,0" Command="{Binding CopyTimelineRowsCommand}" Content="Copy selected rows" />
+                                        <Button Width="150" Margin="0,0,8,0" Command="{Binding ExportTimelineCsvCommand}" Content="Export timeline CSV" />
+                                        <Button Width="100" Command="{Binding RefreshDetailsCommand}" Content="Refresh" />
+                                        <TextBlock Margin="12,5,0,0" Text="{Binding TimelineEmptyMessage}" />
+                                    </StackPanel>
+                                    <DataGrid AutomationProperties.AutomationId="DetailTimelineGrid" ItemsSource="{Binding DetailTimelineRows}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" EnableRowVirtualization="True" EnableColumnVirtualization="True" MinHeight="260">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Time local" Binding="{Binding TimeLocal}" Width="160" />
+                                            <DataGridTextColumn Header="Time UTC" Binding="{Binding TimeUtc}" Width="160" />
+                                            <DataGridTextColumn Header="Method" Binding="{Binding Method}" Width="105" />
+                                            <DataGridTextColumn Header="Target" Binding="{Binding Target}" Width="150" />
+                                            <DataGridTextColumn Header="Host" Binding="{Binding Host}" Width="140" />
+                                            <DataGridTextColumn Header="Address family" Binding="{Binding AddressFamily}" Width="100" />
+                                            <DataGridTextColumn Header="Sequence" Binding="{Binding Sequence}" Width="75" />
+                                            <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="85" />
+                                            <DataGridTextColumn Header="Latency ms" Binding="{Binding LatencyMilliseconds}" Width="85" />
+                                            <DataGridTextColumn Header="Failure category" Binding="{Binding FailureCategory}" Width="130" />
+                                            <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="220" />
+                                            <DataGridTextColumn Header="Probe stream ID" Binding="{Binding ProbeStreamId}" Width="260" />
+                                            <DataGridTextColumn Header="Methodology version" Binding="{Binding MethodologyVersion}" Width="130" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </DockPanel>
                             </TabItem>
                             <TabItem Header="ICMP packet loss">
-                                <DataGrid ItemsSource="{Binding DetailPacketLoss}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MinHeight="220">
-                                    <DataGrid.Columns>
-                                        <DataGridTextColumn Header="Target" Binding="{Binding TargetName}" Width="220" />
-                                        <DataGridTextColumn Header="Sent" Binding="{Binding Sent}" Width="100" />
-                                        <DataGridTextColumn Header="Received" Binding="{Binding Received}" Width="100" />
-                                        <DataGridTextColumn Header="Lost" Binding="{Binding Lost}" Width="100" />
-                                        <DataGridTextColumn Header="Loss %" Binding="{Binding LossPercent}" Width="100" />
-                                    </DataGrid.Columns>
-                                </DataGrid>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8" Text="{Binding IcmpEmptyMessage}" />
+                                    <DataGrid AutomationProperties.AutomationId="DetailIcmpSummaryGrid" DockPanel.Dock="Top" ItemsSource="{Binding DetailIcmpSummaryRows}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" EnableRowVirtualization="True" MinHeight="150">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Target" Binding="{Binding Target}" Width="130" />
+                                            <DataGridTextColumn Header="Host" Binding="{Binding Host}" Width="130" />
+                                            <DataGridTextColumn Header="Family" Binding="{Binding AddressFamily}" Width="80" />
+                                            <DataGridTextColumn Header="Probe stream" Binding="{Binding ProbeStreamId}" Width="220" />
+                                            <DataGridTextColumn Header="Total" Binding="{Binding TotalProbes}" Width="65" />
+                                            <DataGridTextColumn Header="Success" Binding="{Binding SuccessfulProbes}" Width="70" />
+                                            <DataGridTextColumn Header="Failed" Binding="{Binding FailedProbes}" Width="70" />
+                                            <DataGridTextColumn Header="Loss" Binding="{Binding PacketLossPercent}" Width="70" />
+                                            <DataGridTextColumn Header="Min" Binding="{Binding MinimumRtt}" Width="70" />
+                                            <DataGridTextColumn Header="Median" Binding="{Binding MedianRtt}" Width="75" />
+                                            <DataGridTextColumn Header="Mean" Binding="{Binding MeanRtt}" Width="70" />
+                                            <DataGridTextColumn Header="P95" Binding="{Binding P95Rtt}" Width="70" />
+                                            <DataGridTextColumn Header="Max" Binding="{Binding MaximumRtt}" Width="70" />
+                                            <DataGridTextColumn Header="Jitter" Binding="{Binding Jitter}" Width="110" />
+                                            <DataGridTextColumn Header="First sample" Binding="{Binding FirstSampleLocal}" Width="160" />
+                                            <DataGridTextColumn Header="Last sample" Binding="{Binding LastSampleLocal}" Width="160" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                    <DataGrid AutomationProperties.AutomationId="DetailIcmpRowsGrid" Margin="0,10,0,0" ItemsSource="{Binding DetailIcmpRows}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" EnableRowVirtualization="True" MinHeight="190">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Time local" Binding="{Binding TimeLocal}" Width="160" />
+                                            <DataGridTextColumn Header="Target" Binding="{Binding Target}" Width="130" />
+                                            <DataGridTextColumn Header="Host" Binding="{Binding Host}" Width="130" />
+                                            <DataGridTextColumn Header="Family" Binding="{Binding AddressFamily}" Width="80" />
+                                            <DataGridTextColumn Header="Sequence" Binding="{Binding Sequence}" Width="75" />
+                                            <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="80" />
+                                            <DataGridTextColumn Header="RTT" Binding="{Binding Rtt}" Width="75" />
+                                            <DataGridTextColumn Header="Failure" Binding="{Binding Failure}" Width="130" />
+                                            <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="180" />
+                                            <DataGridTextColumn Header="Probe stream" Binding="{Binding ProbeStreamId}" Width="260" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </DockPanel>
                             </TabItem>
                             <TabItem Header="DNS / TCP / HTTPS">
-                                <DataGrid ItemsSource="{Binding DetailMeasurements}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MinHeight="220">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8" Text="{Binding ConnectivityEmptyMessage}" />
+                                    <DataGrid AutomationProperties.AutomationId="DetailConnectivityGrid" ItemsSource="{Binding DetailConnectivityRows}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" EnableRowVirtualization="True" MinHeight="260">
                                     <DataGrid.Columns>
-                                        <DataGridTextColumn Header="Time (local)" Binding="{Binding ObservedAt.LocalDateTime}" Width="160" />
+                                        <DataGridTextColumn Header="Time local" Binding="{Binding TimeLocal}" Width="160" />
                                         <DataGridTextColumn Header="Method" Binding="{Binding Method}" Width="110" />
-                                        <DataGridTextColumn Header="Target" Binding="{Binding TargetName}" Width="180" />
-                                        <DataGridTextColumn Header="Host" Binding="{Binding TargetHost}" Width="140" />
-                                        <DataGridTextColumn Header="Succeeded" Binding="{Binding Succeeded}" Width="90" />
-                                        <DataGridTextColumn Header="Duration ms" Binding="{Binding LatencyMilliseconds}" Width="95" />
+                                        <DataGridTextColumn Header="Target" Binding="{Binding Target}" Width="180" />
+                                        <DataGridTextColumn Header="Host" Binding="{Binding Host}" Width="140" />
+                                        <DataGridTextColumn Header="Family" Binding="{Binding AddressFamily}" Width="90" />
+                                        <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="90" />
+                                        <DataGridTextColumn Header="Response time" Binding="{Binding ResponseTime}" Width="105" />
                                         <DataGridTextColumn Header="Failure" Binding="{Binding FailureCategory}" Width="130" />
-                                        <DataGridTextColumn Header="Message" Binding="{Binding FailureMessage}" Width="*" />
+                                        <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*" />
+                                        <DataGridTextColumn Header="Methodology" Binding="{Binding MethodologyVersion}" Width="110" />
                                     </DataGrid.Columns>
-                                </DataGrid>
+                                    </DataGrid>
+                                </DockPanel>
                             </TabItem>
                             <TabItem Header="Speed tests">
-                                <DataGrid ItemsSource="{Binding DetailSpeedTests}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MinHeight="220">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8" Text="{Binding SpeedTestsEmptyMessage}" />
+                                    <DataGrid AutomationProperties.AutomationId="DetailSpeedTestsGrid" ItemsSource="{Binding DetailSpeedTestRows}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" EnableRowVirtualization="True" MinHeight="260">
                                     <DataGrid.Columns>
-                                        <DataGridTextColumn Header="Time (local)" Binding="{Binding ObservedAt.LocalDateTime}" Width="160" />
                                         <DataGridTextColumn Header="Direction" Binding="{Binding Direction}" Width="100" />
-                                        <DataGridTextColumn Header="Status" Binding="{Binding ResultStatus}" Width="145" />
-                                        <DataGridTextColumn Header="Mbps" Binding="{Binding MegabitsPerSecond}" Width="100" />
-                                        <DataGridTextColumn Header="Bytes" Binding="{Binding BytesTransferred}" Width="120" />
-                                        <DataGridTextColumn Header="Transfer ms" Binding="{Binding TransferDuration.TotalMilliseconds}" Width="100" />
-                                        <DataGridTextColumn Header="Warmup ms" Binding="{Binding WarmupDuration.TotalMilliseconds}" Width="95" />
-                                        <DataGridTextColumn Header="Streams" Binding="{Binding ParallelStreamCount}" Width="75" />
-                                        <DataGridTextColumn Header="HTTP" Binding="{Binding HttpVersion}" Width="70" />
+                                        <DataGridTextColumn Header="Result status" Binding="{Binding ResultStatus}" Width="180" />
+                                        <DataGridTextColumn Header="Mbps" Binding="{Binding MegabitsPerSecond}" Width="85" />
                                         <DataGridTextColumn Header="Provider" Binding="{Binding Provider}" Width="140" />
                                         <DataGridTextColumn Header="Endpoint" Binding="{Binding Endpoint}" Width="210" />
-                                        <DataGridTextColumn Header="Methodology" Binding="{Binding MethodologyVersion}" Width="110" />
-                                        <DataGridTextColumn Header="Failure" Binding="{Binding FailureCategory}" Width="*" />
+                                        <DataGridTextColumn Header="Start local" Binding="{Binding StartLocal}" Width="160" />
+                                        <DataGridTextColumn Header="Duration" Binding="{Binding Duration}" Width="100" />
+                                        <DataGridTextColumn Header="Bytes" Binding="{Binding BytesTransferred}" Width="120" />
+                                        <DataGridTextColumn Header="Streams" Binding="{Binding StreamCount}" Width="75" />
+                                        <DataGridTextColumn Header="HTTP" Binding="{Binding HttpVersion}" Width="70" />
+                                        <DataGridTextColumn Header="Setup" Binding="{Binding SetupDuration}" Width="95" />
+                                        <DataGridTextColumn Header="Warm-up" Binding="{Binding WarmupDuration}" Width="95" />
+                                        <DataGridTextColumn Header="Failure" Binding="{Binding FailureCategory}" Width="140" />
+                                        <DataGridTextColumn Header="Message" Binding="{Binding FailureMessage}" Width="220" />
+                                        <DataGridTextColumn Header="Confidence flags" Binding="{Binding ConfidenceFlags}" Width="300" />
+                                        <DataGridTextColumn Header="Methodology" Binding="{Binding MethodologyVersion}" Width="150" />
                                     </DataGrid.Columns>
-                                </DataGrid>
+                                    </DataGrid>
+                                </DockPanel>
                             </TabItem>
                             <TabItem Header="Events and markers">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="*" />
-                                        <RowDefinition Height="*" />
-                                    </Grid.RowDefinitions>
-                                    <DataGrid ItemsSource="{Binding DetailNetworkEvents}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MinHeight="150">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8" Text="{Binding EventsEmptyMessage}" />
+                                    <DataGrid AutomationProperties.AutomationId="DetailEventsGrid" ItemsSource="{Binding DetailEventRows}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" EnableRowVirtualization="True" MinHeight="260">
                                         <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Time (local)" Binding="{Binding ObservedAt.LocalDateTime}" Width="160" />
-                                            <DataGridTextColumn Header="Event" Binding="{Binding EventType}" Width="120" />
-                                            <DataGridTextColumn Header="Interface" Binding="{Binding InterfaceName}" Width="180" />
-                                            <DataGridTextColumn Header="Gateway" Binding="{Binding Gateway}" Width="150" />
-                                            <DataGridTextColumn Header="Details" Binding="{Binding Details}" Width="*" />
+                                            <DataGridTextColumn Header="Time local" Binding="{Binding TimeLocal}" Width="160" />
+                                            <DataGridTextColumn Header="Event type" Binding="{Binding EventType}" Width="130" />
+                                            <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="85" />
+                                            <DataGridTextColumn Header="Interface" Binding="{Binding Interface}" Width="150" />
+                                            <DataGridTextColumn Header="Gateway" Binding="{Binding Gateway}" Width="140" />
+                                            <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="260" />
+                                            <DataGridTextColumn Header="Related target" Binding="{Binding RelatedTarget}" Width="130" />
+                                            <DataGridTextColumn Header="Related ID" Binding="{Binding RelatedId}" Width="260" />
                                         </DataGrid.Columns>
                                     </DataGrid>
-                                    <DataGrid Grid.Row="1" Margin="0,10,0,0" ItemsSource="{Binding DetailMarkers}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" MinHeight="120">
-                                        <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Time (local)" Binding="{Binding ObservedAt.LocalDateTime}" Width="170" />
-                                            <DataGridTextColumn Header="Note" Binding="{Binding Note}" Width="*" />
-                                        </DataGrid.Columns>
-                                    </DataGrid>
-                                </Grid>
+                                </DockPanel>
                             </TabItem>
                         </TabControl>
                     </StackPanel>

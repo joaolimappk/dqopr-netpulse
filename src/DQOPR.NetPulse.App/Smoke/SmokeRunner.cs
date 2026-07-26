@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.IO;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using DQOPR.NetPulse.App.ViewModels;
 using DQOPR.NetPulse.Core.Configuration;
 using DQOPR.NetPulse.Core.Models;
 using DQOPR.NetPulse.Core.Monitoring;
@@ -50,7 +51,7 @@ public static class SmokeRunner
         await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, options.DurationSeconds - 6))).ConfigureAwait(true);
         await window.ViewModel.StopMonitoringAsync().ConfigureAwait(true);
 
-        await window.ViewModel.RunQuickTestAsync(
+        var quickTest = await window.ViewModel.RunQuickTestAsync(
             new QuickTestOptions
             {
                 ProbeBurstCount = 20,
@@ -63,10 +64,18 @@ public static class SmokeRunner
 
         SaveTabScreenshot(window, 0, options.OutputDirectory, "quick-test-complete.png");
         await window.ViewModel.RefreshHistoryAsync().ConfigureAwait(true);
+        window.ViewModel.SelectedSession = window.ViewModel.Sessions.FirstOrDefault(session => session.Id == quickTest.Session.Id)
+            ?? throw new InvalidOperationException($"Quick Test session {quickTest.Session.Id} was not present in History.");
         await window.ViewModel.OpenSelectedSessionAsync().ConfigureAwait(true);
+        AssertSessionDetailsLoaded(window.ViewModel, quickTest.Session.Id);
         SaveTabScreenshot(window, 0, options.OutputDirectory, "dashboard.png");
         SaveTabScreenshot(window, 1, options.OutputDirectory, "history.png");
         SaveTabScreenshot(window, 2, options.OutputDirectory, "session-details.png");
+        SaveDetailTabScreenshot(window, 0, options.OutputDirectory, "session-details-timeline.png");
+        SaveDetailTabScreenshot(window, 1, options.OutputDirectory, "session-details-icmp.png");
+        SaveDetailTabScreenshot(window, 2, options.OutputDirectory, "session-details-connectivity.png");
+        SaveDetailTabScreenshot(window, 3, options.OutputDirectory, "session-details-speed-tests.png");
+        SaveDetailTabScreenshot(window, 4, options.OutputDirectory, "session-details-events-markers.png");
         SaveTabScreenshot(window, 3, options.OutputDirectory, "reports.png");
         SaveTabScreenshot(window, 4, options.OutputDirectory, "settings.png");
         SaveTabScreenshot(window, 5, options.OutputDirectory, "activity-log.png");
@@ -94,15 +103,96 @@ public static class SmokeRunner
                     screenshots = "WPF RenderTargetBitmap, not an attended desktop screenshot",
                     database = options.DatabasePath,
                     monitoringDurationSeconds = options.DurationSeconds,
+                    selectedSessionId = window.ViewModel.SelectedSession?.Id,
+                    detailCounts = new
+                    {
+                        timelineRows = window.ViewModel.DetailTimelineRows.Count,
+                        icmpSummaryRows = window.ViewModel.DetailIcmpSummaryRows.Count,
+                        icmpRows = window.ViewModel.DetailIcmpRows.Count,
+                        connectivityRows = window.ViewModel.DetailConnectivityRows.Count,
+                        speedTestRows = window.ViewModel.DetailSpeedTestRows.Count,
+                        eventRows = window.ViewModel.DetailEventRows.Count,
+                        latencyChartPoints = window.ViewModel.LatencyChartCount,
+                        jitterChartPoints = window.ViewModel.JitterChartCount,
+                        packetLossChartPoints = window.ViewModel.PacketLossChartCount,
+                        speedChartPoints = window.ViewModel.SpeedChartCount
+                    },
                     screenshotFiles = screenshots,
                     exportFiles = generatedExports
                 },
                 new JsonSerializerOptions { WriteIndented = true })).ConfigureAwait(true);
     }
 
+    private static void AssertSessionDetailsLoaded(DashboardViewModel viewModel, Guid expectedSessionId)
+    {
+        if (viewModel.SelectedSession?.Id != expectedSessionId)
+        {
+            throw new InvalidOperationException($"Session Details loaded the wrong session. Expected {expectedSessionId}, got {viewModel.SelectedSession?.Id}.");
+        }
+
+        var failures = new List<string>();
+        if (viewModel.DetailTimelineRows.Count == 0)
+        {
+            failures.Add("Timeline has no rows.");
+        }
+
+        if (viewModel.DetailIcmpSummaryRows.Count == 0 || viewModel.DetailIcmpRows.Count == 0)
+        {
+            failures.Add("ICMP tab has no rows.");
+        }
+
+        if (viewModel.DetailConnectivityRows.Count == 0)
+        {
+            failures.Add("DNS/TCP/HTTPS tab has no rows.");
+        }
+
+        if (viewModel.DetailSpeedTestRows.Count == 0)
+        {
+            failures.Add("Speed Tests tab has no rows.");
+        }
+
+        if (viewModel.DetailEventRows.Count == 0)
+        {
+            failures.Add("Events and Markers tab has no rows.");
+        }
+
+        if (viewModel.LatencyChartCount == 0)
+        {
+            failures.Add("Latency chart has no points.");
+        }
+
+        if (viewModel.JitterChartCount == 0)
+        {
+            failures.Add("Jitter chart has no points.");
+        }
+
+        if (viewModel.PacketLossChartCount == 0)
+        {
+            failures.Add("Packet-loss chart has no points.");
+        }
+
+        if (viewModel.SpeedChartCount == 0)
+        {
+            failures.Add("Download/upload chart has no points.");
+        }
+
+        if (failures.Count > 0)
+        {
+            throw new InvalidOperationException("Session Details smoke validation failed: " + string.Join(" ", failures));
+        }
+    }
+
     private static void SaveTabScreenshot(MainWindow window, int selectedTabIndex, string outputDirectory, string fileName)
     {
         window.ViewModel.SelectedTabIndex = selectedTabIndex;
+        window.UpdateLayout();
+        SaveScreenshot(window, Path.Combine(outputDirectory, fileName));
+    }
+
+    private static void SaveDetailTabScreenshot(MainWindow window, int selectedDetailTabIndex, string outputDirectory, string fileName)
+    {
+        window.ViewModel.SelectedTabIndex = 2;
+        window.ViewModel.SelectedDetailTabIndex = selectedDetailTabIndex;
         window.UpdateLayout();
         SaveScreenshot(window, Path.Combine(outputDirectory, fileName));
     }
