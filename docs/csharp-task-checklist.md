@@ -52,7 +52,8 @@
 - [x] Windows workflow passes for C# UI milestone `0.3.0-alpha.3` in run `30144179021`.
 - [x] Windows workflow passes for measurement-correctness milestone `0.3.0-alpha.4` in run `30164232273`.
 - [x] Alpha.4 smoke artifact from run `30164232273` identified invalid throughput accounting evidence: download `4472.688 Mbps`, upload `2871.775 Mbps`.
-- [ ] Windows workflow passes after global-window throughput correction.
+- [x] Windows workflow passes after global-window throughput correction in run `30184619268`.
+- [x] Global-window smoke artifact marks CI datacenter throughput as invalid accounting evidence instead of valid speed: download and upload both `SuspiciousThroughputCeiling`.
 - [ ] WPF app launches on Windows 10.
 - [ ] WPF app launches on Windows 11.
 - [ ] Quick Test works on Windows.

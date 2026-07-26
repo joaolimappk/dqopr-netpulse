@@ -51,10 +51,12 @@ Version: `0.3.0-alpha.4`
 
 ## Latest Verification
 
-- Previous GitHub Actions run `30164232273` passed build/UI smoke, but its speed values (`4472.688 Mbps` download and `2871.775 Mbps` upload) are now classified as evidence of the old per-stream timing defect, not accuracy validation.
-- Current throughput implementation requires a fresh CI smoke run after the global-window correction.
+- Current verified GitHub Actions run `30184619268`: passed on `windows-latest` for commit `e1a93e44fce1a4d600efe7e1b9f89418e85ec024`, built, tested, published WPF app artifact `dqopr-netpulse-csharp-win-x64`, and uploaded smoke evidence artifact `dqopr-netpulse-csharp-smoke-evidence`.
+- Current smoke evidence artifact `dqopr-netpulse-csharp-smoke-evidence`: verified locally after download; includes nonempty screenshots, `netpulse-smoke.sqlite3`, `measurements-export.json`, `smoke_metadata.json`, CSV export, JSON export, HTML report, and diagnostic JSON.
+- Current smoke SQLite evidence: 2 sessions, 47 measurements, 2 speed-test rows, 3 network-interface events, 0 manual markers, 0 incidents, 0 reference speed results.
+- Current smoke speed evidence: download `8,764,370,170` bytes over `12.000 s`, 4 streams, status `Invalid result - measurement accounting inconsistency`, failure `SuspiciousThroughputCeiling`; upload `3,309,305,856` bytes over `12.008 s`, 4 streams, status `Invalid result - measurement accounting inconsistency`, failure `SuspiciousThroughputCeiling`.
 - Current deterministic local throughput validation uses a controlled loopback HTTP server and verifies that persisted evidence recomputes from global elapsed wall-clock duration and summed stream bytes.
 - Current local Linux-compatible validation: `python3 -m ruff check .` passed; `python3 -m mypy src/dqopr_netpulse` passed; `python3 -m pytest -q` passed, 24 tests with 2 skipped; `git diff --check` passed.
-- Current local .NET validation must be run with the SDK pinned in `global.json`; use `scripts/validate.sh`.
+- Current local .NET validation: `scripts/validate.sh` passed with pinned SDK `10.0.302`; C# tests passed, 37 total; NuGet vulnerability scan found no vulnerable packages.
 - Real attended Windows desktop alpha.4 comparison verification: not yet completed.
 - Installer verification: not yet started.
