@@ -243,9 +243,12 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
             ? TimeSpan.Zero
             : TimeSpan.FromMilliseconds(streams.Average(stream => stream.SetupDuration.TotalMilliseconds));
         var failure = ValidateThroughput(direction, bytes, window.Elapsed, streams);
+        var confidence = EvaluateConfidence(direction, bytes, window.Elapsed, streams);
         var failed = streams.Where(stream => !stream.Succeeded).ToArray();
         var status = failure is not null
             ? SpeedResultStatus.MeasurementAccountingInconsistency
+            : confidence.SuspectedEndpointLimitation
+                ? SpeedResultStatus.DegradedUploadEndpointMayBeLimiting
             : ThroughputCalculator.Classify(anySucceeded: bytes > 0, anyFailed: failed.Length > 0, window.Elapsed, options.MinimumMeasurementDuration, uploadEndpointUnavailable: direction == "upload" && bytes == 0);
 
         return new ThroughputWindowResult(
@@ -255,8 +258,9 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
             bytes,
             setupDuration,
             status,
-            failure?.Category ?? failed.FirstOrDefault()?.FailureCategory,
-            failure?.Message ?? failed.FirstOrDefault()?.FailureMessage,
+            failure?.Category ?? (confidence.SuspectedEndpointLimitation ? "UploadEndpointMayBeLimitingThroughput" : failed.FirstOrDefault()?.FailureCategory),
+            failure?.Message ?? (confidence.SuspectedEndpointLimitation ? "Degraded - upload endpoint may be limiting throughput." : failed.FirstOrDefault()?.FailureMessage),
+            confidence,
             streams);
 
         async Task<ThroughputStreamResult> WorkerAfterGateAsync(int index)
@@ -287,7 +291,7 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
             }
 
             stopwatch.Stop();
-            var headers = ResponseEvidence.From(response);
+            var headers = ResponseEvidence.From(response, stopwatch.Elapsed);
             return response.IsSuccessStatusCode
                 ? ThroughputStreamResult.Success(0, startedAt, DateTimeOffset.UtcNow, 0, stopwatch.Elapsed, TimeSpan.Zero, response.Version.ToString(), TimeSpan.Zero, stopwatch.Elapsed, 1, [headers])
                 : ThroughputStreamResult.Failed(0, startedAt, DateTimeOffset.UtcNow, 0, stopwatch.Elapsed, TimeSpan.Zero, $"HTTP {(int)response.StatusCode}", response.ReasonPhrase ?? "Download warmup failed.", response.Version.ToString(), TimeSpan.Zero, stopwatch.Elapsed, 1, [headers]);
@@ -320,7 +324,7 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
                 setup.Stop();
                 setupDuration += setup.Elapsed;
                 httpVersion = response.Version.ToString();
-                responses.Add(ResponseEvidence.From(response));
+                responses.Add(ResponseEvidence.From(response, setup.Elapsed));
                 if (!response.IsSuccessStatusCode)
                 {
                     stoppedOffset = ThroughputWindow.Current.Elapsed;
@@ -365,7 +369,7 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
             using var request = BuildUploadRequest(uri, payload, 0, 0, null, null);
             using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             setup.Stop();
-            var headers = ResponseEvidence.From(response);
+            var headers = ResponseEvidence.From(response, setup.Elapsed);
             return response.IsSuccessStatusCode
                 ? ThroughputStreamResult.Success(0, startedAt, DateTimeOffset.UtcNow, 0, setup.Elapsed, TimeSpan.Zero, response.Version.ToString(), TimeSpan.Zero, setup.Elapsed, 1, [headers])
                 : ThroughputStreamResult.Failed(0, startedAt, DateTimeOffset.UtcNow, 0, setup.Elapsed, TimeSpan.Zero, $"HTTP {(int)response.StatusCode}", response.ReasonPhrase ?? "Upload warmup failed.", response.Version.ToString(), TimeSpan.Zero, setup.Elapsed, 1, [headers]);
@@ -386,6 +390,7 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
         var stoppedOffset = startedOffset;
         var requestIndex = 0;
         var responses = new List<ResponseEvidence>();
+        long bytesExcludedAfterDeadline = 0;
         try
         {
             while (!ThroughputWindow.Current.IsExpired && !cancellationToken.IsCancellationRequested)
@@ -393,34 +398,44 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
                 requestIndex++;
                 var setupWatch = Stopwatch.StartNew();
                 long requestBytes = 0;
-                using var request = BuildUploadRequest(uri, payload, streamIndex, requestIndex, ThroughputWindow.Current, written => requestBytes += written);
+                using var request = BuildUploadRequest(uri, payload, streamIndex, requestIndex, ThroughputWindow.Current, (written, afterDeadline) =>
+                {
+                    requestBytes += written;
+                    if (afterDeadline)
+                    {
+                        bytesExcludedAfterDeadline += written;
+                    }
+                    else
+                    {
+                        bytes += written;
+                    }
+                });
                 using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ThroughputWindow.Current.CancellationToken).ConfigureAwait(false);
                 setupWatch.Stop();
                 setup += setupWatch.Elapsed;
-                bytes += requestBytes;
-                responses.Add(ResponseEvidence.From(response));
+                responses.Add(ResponseEvidence.From(response, setupWatch.Elapsed, requestBytes));
                 if (!response.IsSuccessStatusCode)
                 {
                     stoppedOffset = ThroughputWindow.Current.Elapsed;
-                    return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup, stoppedOffset - startedOffset, $"HTTP {(int)response.StatusCode}", response.ReasonPhrase ?? "Upload endpoint rejected the payload.", response.Version.ToString(), startedOffset, stoppedOffset, requestIndex, responses);
+                    return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup, stoppedOffset - startedOffset, $"HTTP {(int)response.StatusCode}", response.ReasonPhrase ?? "Upload endpoint rejected the payload.", response.Version.ToString(), startedOffset, stoppedOffset, requestIndex, responses, bytesExcludedAfterDeadline, "endpoint rejected request");
                 }
             }
 
             stoppedOffset = ThroughputWindow.Current.Elapsed;
-            return ThroughputStreamResult.Success(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup, stoppedOffset - startedOffset, responses.LastOrDefault()?.HttpVersion, startedOffset, stoppedOffset, requestIndex, responses);
+            return ThroughputStreamResult.Success(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup, stoppedOffset - startedOffset, responses.LastOrDefault()?.HttpVersion, startedOffset, stoppedOffset, requestIndex, responses, bytesExcludedAfterDeadline, ThroughputWindow.Current.IsExpired ? "global deadline reached" : "worker completed before deadline");
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException)
         {
             stoppedOffset = ThroughputWindow.Current?.Elapsed ?? stoppedOffset;
             return bytes > 0 && ThroughputWindow.Current?.IsExpired == true
-                ? ThroughputStreamResult.Success(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup, stoppedOffset - startedOffset, responses.LastOrDefault()?.HttpVersion, startedOffset, stoppedOffset, requestIndex, responses)
-                : ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup, stoppedOffset - startedOffset, ex.GetType().Name, ex.Message, responses.LastOrDefault()?.HttpVersion, startedOffset, stoppedOffset, requestIndex, responses);
+                ? ThroughputStreamResult.Success(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup, stoppedOffset - startedOffset, responses.LastOrDefault()?.HttpVersion, startedOffset, stoppedOffset, requestIndex, responses, bytesExcludedAfterDeadline, "global deadline canceled in-flight request")
+                : ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup, stoppedOffset - startedOffset, ex.GetType().Name, ex.Message, responses.LastOrDefault()?.HttpVersion, startedOffset, stoppedOffset, requestIndex, responses, bytesExcludedAfterDeadline, ex.GetType().Name);
         }
     }
 
     private SpeedTestMeasurement SpeedResult(Guid sessionId, DateTimeOffset observedAt, string direction, Uri uri, ThroughputWindowResult result, ThroughputStreamResult warmup)
     {
-        var succeeded = result.ResultStatus is SpeedResultStatus.Valid or SpeedResultStatus.Degraded;
+        var succeeded = result.ResultStatus is SpeedResultStatus.Valid or SpeedResultStatus.Degraded or SpeedResultStatus.DegradedUploadEndpointMayBeLimiting;
         var mbps = succeeded ? ThroughputCalculator.MegabitsPerSecond(result.BytesTransferred, result.Elapsed) : null;
         var diagnostic = JsonSerializer.Serialize(new
         {
@@ -431,6 +446,7 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
             timingModel = "global-wall-clock-window",
             streamCount = options.ParallelStreamCount,
             maximumCredibleMegabitsPerSecond = options.MaximumCredibleMegabitsPerSecond,
+            endpointStrategy = direction == "upload" ? "single configured upload endpoint; no silent fallback selected" : "single configured download endpoint",
             globalStartUtc = result.StartedAtUtc,
             globalEndUtc = result.EndedAtUtc,
             globalElapsedMs = result.Elapsed.TotalMilliseconds,
@@ -441,6 +457,7 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
             resultStatus = result.ResultStatus,
             failureCategory = result.FailureCategory,
             failureMessage = result.FailureMessage,
+            confidence = result.Confidence,
             warmup = new
             {
                 warmup.Succeeded,
@@ -460,6 +477,8 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
                 workerStartOffsetMs = stream.WorkerStartOffset.TotalMilliseconds,
                 workerStopOffsetMs = stream.WorkerStopOffset.TotalMilliseconds,
                 stream.RequestCount,
+                stream.BytesExcludedAfterDeadline,
+                stream.CancellationReason,
                 setupDurationMs = stream.SetupDuration.TotalMilliseconds,
                 transferDurationMs = stream.TransferDuration.TotalMilliseconds,
                 stream.HttpVersion,
@@ -473,7 +492,7 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
 
     private SpeedTestMeasurement FailedSpeed(Guid sessionId, DateTimeOffset observedAt, string direction, TimeSpan duration, Uri uri, string status, string category, string message, ThroughputStreamResult? warmup, IReadOnlyList<ThroughputStreamResult>? streams)
     {
-        var result = new ThroughputWindowResult(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, duration, streams?.Sum(stream => stream.BytesTransferred) ?? 0, TimeSpan.Zero, status, category, message, streams ?? []);
+        var result = new ThroughputWindowResult(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, duration, streams?.Sum(stream => stream.BytesTransferred) ?? 0, TimeSpan.Zero, status, category, message, ThroughputConfidence.NotEvaluated, streams ?? []);
         var warmupResult = warmup ?? ThroughputStreamResult.Failed(0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0, TimeSpan.Zero, TimeSpan.Zero, "NotRun", "Warmup did not run.", null, TimeSpan.Zero, TimeSpan.Zero, 0, []);
         return SpeedResult(sessionId, observedAt, direction, uri, result, warmupResult);
     }
@@ -520,6 +539,94 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
         return null;
     }
 
+    private ThroughputConfidence EvaluateConfidence(string direction, long bytes, TimeSpan elapsed, IReadOnlyList<ThroughputStreamResult> streams)
+    {
+        if (streams.Count == 0 || elapsed <= TimeSpan.Zero)
+        {
+            return ThroughputConfidence.NotEvaluated with { Reasons = ["No measured streams were available."] };
+        }
+
+        var elapsedMs = Math.Max(1, elapsed.TotalMilliseconds);
+        var participationRatios = streams
+            .Select(stream => Math.Clamp((stream.WorkerStopOffset - stream.WorkerStartOffset).TotalMilliseconds / elapsedMs, 0, 1))
+            .ToArray();
+        var minimumParticipationRatio = participationRatios.Min();
+        var allStreamsActive = minimumParticipationRatio >= options.MinimumStreamParticipationRatio;
+        var maxBytes = streams.Max(stream => stream.BytesTransferred);
+        var minBytes = streams.Min(stream => stream.BytesTransferred);
+        var streamBalanceRatio = maxBytes <= 0 ? 0 : (double)minBytes / maxBytes;
+        var minimumTransferredDataMet = direction != "upload"
+            || bytes >= (long)options.MinimumUploadBytesPerStream * streams.Count;
+        var allResponsesSuccessful = streams.All(stream =>
+            stream.Responses.Count > 0
+            && stream.Responses.All(response => response.StatusCode is >= 200 and <= 299));
+        var earlyCompletion = streams.Any(stream => stream.WorkerStopOffset < elapsed - TimeSpan.FromMilliseconds(250));
+        var excludedBytes = streams.Sum(stream => stream.BytesExcludedAfterDeadline);
+        var likelyFlowControlOrCompletionStall = direction == "upload"
+            && streams.Any(stream =>
+                stream.RequestCount <= 1
+                && stream.SetupDuration.TotalMilliseconds / elapsedMs > 0.80
+                && stream.BytesTransferred > 0);
+
+        var reasons = new List<string>();
+        if (!allStreamsActive)
+        {
+            reasons.Add($"One or more streams participated in less than {options.MinimumStreamParticipationRatio:P0} of the global window.");
+        }
+
+        if (streamBalanceRatio < options.MinimumStreamBalanceRatio)
+        {
+            reasons.Add($"Per-stream byte balance ratio {streamBalanceRatio:0.00} is below {options.MinimumStreamBalanceRatio:0.00}.");
+        }
+
+        if (!minimumTransferredDataMet)
+        {
+            reasons.Add("Transferred upload data did not meet the minimum diagnostic threshold.");
+        }
+
+        if (!allResponsesSuccessful)
+        {
+            reasons.Add("One or more endpoint responses were missing or unsuccessful.");
+        }
+
+        if (earlyCompletion)
+        {
+            reasons.Add("One or more workers stopped before the global deadline.");
+        }
+
+        if (likelyFlowControlOrCompletionStall)
+        {
+            reasons.Add("At least one upload stream spent most of the window in one request, which may indicate flow-control, endpoint, or response-completion delay.");
+        }
+
+        if (excludedBytes > 0)
+        {
+            reasons.Add("Some write buffers completed after the global deadline and were excluded from the Mbps calculation.");
+        }
+
+        var suspectedEndpointLimitation = direction == "upload"
+            && streams.Count > 1
+            && bytes > 0
+            && allResponsesSuccessful
+            && (earlyCompletion
+                || !allStreamsActive
+                || streamBalanceRatio < options.MinimumStreamBalanceRatio
+                || !minimumTransferredDataMet
+                || likelyFlowControlOrCompletionStall);
+
+        return new ThroughputConfidence(
+            allStreamsActive,
+            minimumParticipationRatio,
+            streamBalanceRatio,
+            allResponsesSuccessful,
+            minimumTransferredDataMet,
+            earlyCompletion,
+            likelyFlowControlOrCompletionStall,
+            excludedBytes,
+            suspectedEndpointLimitation,
+            reasons);
+    }
+
     private static HttpRequestMessage BuildDownloadRequest(Uri uri, int streamIndex, long requestIndex)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, CacheBusted(uri, streamIndex, requestIndex)) { VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher };
@@ -530,7 +637,7 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
         return request;
     }
 
-    private HttpRequestMessage BuildUploadRequest(Uri uri, byte[] payload, int streamIndex, long requestIndex, ThroughputWindow? window, Action<long>? countBytes)
+    private HttpRequestMessage BuildUploadRequest(Uri uri, byte[] payload, int streamIndex, long requestIndex, ThroughputWindow? window, Action<long, bool>? countBytes)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, CacheBusted(uri, streamIndex, requestIndex)) { VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher };
         request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
@@ -578,9 +685,25 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
         string ResultStatus,
         string? FailureCategory,
         string? FailureMessage,
+        ThroughputConfidence Confidence,
         IReadOnlyList<ThroughputStreamResult> Streams);
 
     private sealed record ThroughputValidationFailure(string Category, string Message);
+
+    private sealed record ThroughputConfidence(
+        bool AllStreamsActive,
+        double MinimumParticipationRatio,
+        double StreamBalanceRatio,
+        bool AllResponsesSuccessful,
+        bool MinimumTransferredDataMet,
+        bool EarlyCompletion,
+        bool LikelyFlowControlOrCompletionStall,
+        long BytesExcludedAfterDeadline,
+        bool SuspectedEndpointLimitation,
+        IReadOnlyList<string> Reasons)
+    {
+        public static ThroughputConfidence NotEvaluated { get; } = new(false, 0, 0, false, false, false, false, 0, false, []);
+    }
 
     private sealed record ThroughputStreamResult(
         int StreamIndex,
@@ -596,15 +719,17 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
         TimeSpan WorkerStartOffset,
         TimeSpan WorkerStopOffset,
         int RequestCount,
-        IReadOnlyList<ResponseEvidence> Responses)
+        IReadOnlyList<ResponseEvidence> Responses,
+        long BytesExcludedAfterDeadline,
+        string? CancellationReason)
     {
         public TimeSpan Elapsed => SetupDuration + TransferDuration;
 
-        public static ThroughputStreamResult Success(int streamIndex, DateTimeOffset startedAt, DateTimeOffset endedAt, long bytesTransferred, TimeSpan setupDuration, TimeSpan transferDuration, string? httpVersion, TimeSpan workerStartOffset, TimeSpan workerStopOffset, int requestCount, IReadOnlyList<ResponseEvidence> responses)
-            => new(streamIndex, startedAt, endedAt, true, bytesTransferred, setupDuration, transferDuration, httpVersion, null, null, workerStartOffset, workerStopOffset, requestCount, responses);
+        public static ThroughputStreamResult Success(int streamIndex, DateTimeOffset startedAt, DateTimeOffset endedAt, long bytesTransferred, TimeSpan setupDuration, TimeSpan transferDuration, string? httpVersion, TimeSpan workerStartOffset, TimeSpan workerStopOffset, int requestCount, IReadOnlyList<ResponseEvidence> responses, long bytesExcludedAfterDeadline = 0, string? cancellationReason = null)
+            => new(streamIndex, startedAt, endedAt, true, bytesTransferred, setupDuration, transferDuration, httpVersion, null, null, workerStartOffset, workerStopOffset, requestCount, responses, bytesExcludedAfterDeadline, cancellationReason);
 
-        public static ThroughputStreamResult Failed(int streamIndex, DateTimeOffset startedAt, DateTimeOffset endedAt, long bytesTransferred, TimeSpan setupDuration, TimeSpan transferDuration, string failureCategory, string failureMessage, string? httpVersion, TimeSpan workerStartOffset, TimeSpan workerStopOffset, int requestCount, IReadOnlyList<ResponseEvidence> responses)
-            => new(streamIndex, startedAt, endedAt, false, bytesTransferred, setupDuration, transferDuration, httpVersion, failureCategory, failureMessage, workerStartOffset, workerStopOffset, requestCount, responses);
+        public static ThroughputStreamResult Failed(int streamIndex, DateTimeOffset startedAt, DateTimeOffset endedAt, long bytesTransferred, TimeSpan setupDuration, TimeSpan transferDuration, string failureCategory, string failureMessage, string? httpVersion, TimeSpan workerStartOffset, TimeSpan workerStopOffset, int requestCount, IReadOnlyList<ResponseEvidence> responses, long bytesExcludedAfterDeadline = 0, string? cancellationReason = null)
+            => new(streamIndex, startedAt, endedAt, false, bytesTransferred, setupDuration, transferDuration, httpVersion, failureCategory, failureMessage, workerStartOffset, workerStopOffset, requestCount, responses, bytesExcludedAfterDeadline, cancellationReason);
     }
 
     private sealed record ResponseEvidence(
@@ -615,9 +740,11 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
         string? ContentEncoding,
         string? Age,
         string? Via,
-        string? XCache)
+        string? XCache,
+        double? RequestDurationMilliseconds,
+        long? RequestBytesWritten)
     {
-        public static ResponseEvidence From(HttpResponseMessage response)
+        public static ResponseEvidence From(HttpResponseMessage response, TimeSpan? requestDuration = null, long? requestBytesWritten = null)
             => new(
                 (int)response.StatusCode,
                 response.ReasonPhrase,
@@ -626,7 +753,9 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
                 string.Join(",", response.Content.Headers.ContentEncoding),
                 response.Headers.TryGetValues("Age", out var age) ? string.Join(",", age) : null,
                 response.Headers.TryGetValues("Via", out var via) ? string.Join(",", via) : null,
-                response.Headers.TryGetValues("X-Cache", out var cache) ? string.Join(",", cache) : null);
+                response.Headers.TryGetValues("X-Cache", out var cache) ? string.Join(",", cache) : null,
+                requestDuration?.TotalMilliseconds,
+                requestBytesWritten);
     }
 
     private sealed class ThroughputWindow : IDisposable
@@ -683,7 +812,7 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
         }
     }
 
-    private sealed class CountingUploadContent(byte[] payload, int bufferSize, ThroughputWindow window, Action<long> countBytes) : HttpContent
+    private sealed class CountingUploadContent(byte[] payload, int bufferSize, ThroughputWindow window, Action<long, bool> countBytes) : HttpContent
     {
         protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
             => SerializeToStreamAsync(stream, context, CancellationToken.None);
@@ -697,10 +826,11 @@ public sealed class NetworkProbeService : INetworkProbeService, IDisposable
                 await stream.WriteAsync(payload.AsMemory(offset, count), cancellationToken).ConfigureAwait(false);
                 if (window.IsExpired)
                 {
+                    countBytes(count, true);
                     break;
                 }
 
-                countBytes(count);
+                countBytes(count, false);
                 offset += count;
             }
         }

@@ -54,6 +54,8 @@
 - [x] Alpha.4 smoke artifact from run `30164232273` identified invalid throughput accounting evidence: download `4472.688 Mbps`, upload `2871.775 Mbps`.
 - [x] Windows workflow passes after global-window throughput correction in run `30184619268`.
 - [x] Global-window smoke artifact marks CI datacenter throughput as invalid accounting evidence instead of valid speed: download and upload both `SuspiciousThroughputCeiling`.
+- [x] First real attended Windows comparison documented: NetPulse `178.7/14.0`, Google `194.5/21.3`, Speedtest.net `209.46/21.58`, Fast.com `210/21`; download passed practical +/-15%, upload did not pass, latency targets were not equivalent.
+- [ ] Repeat attended Windows comparison after upload accounting diagnostics.
 - [ ] WPF app launches on Windows 10.
 - [ ] WPF app launches on Windows 11.
 - [ ] Quick Test works on Windows.

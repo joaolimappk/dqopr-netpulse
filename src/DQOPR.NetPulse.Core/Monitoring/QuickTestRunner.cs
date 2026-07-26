@@ -86,7 +86,7 @@ public sealed class QuickTestRunner(
             await store.UpdateSessionAsync(session, cancellationToken).ConfigureAwait(false);
             OnActivity("Quick Test completed.");
 
-            var invalidSpeeds = speeds.Where(speed => speed.ResultStatus is not (SpeedResultStatus.Valid or SpeedResultStatus.Degraded)).ToArray();
+            var invalidSpeeds = speeds.Where(speed => speed.ResultStatus is not (SpeedResultStatus.Valid or SpeedResultStatus.Degraded or SpeedResultStatus.DegradedUploadEndpointMayBeLimiting)).ToArray();
             var summary = invalidSpeeds.Length == 0
                 ? "Quick Test completed. A Quick Test is a snapshot and may miss intermittent problems."
                 : $"Partial test - {string.Join(", ", invalidSpeeds.Select(speed => $"{speed.Direction} {speed.ResultStatus}"))}.";

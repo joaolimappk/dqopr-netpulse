@@ -18,6 +18,12 @@ public sealed record NetworkProbeOptions
 
     public double MaximumCredibleMegabitsPerSecond { get; init; } = 1_000;
 
+    public double MinimumStreamParticipationRatio { get; init; } = 0.90;
+
+    public double MinimumStreamBalanceRatio { get; init; } = 0.45;
+
+    public int MinimumUploadBytesPerStream { get; init; } = 1024 * 1024;
+
     public NetworkProbeOptions Validate()
     {
         if (WarmupDuration < TimeSpan.Zero)
@@ -48,6 +54,21 @@ public sealed record NetworkProbeOptions
         if (MaximumCredibleMegabitsPerSecond <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(MaximumCredibleMegabitsPerSecond), "Maximum credible throughput must be positive.");
+        }
+
+        if (MinimumStreamParticipationRatio is <= 0 or > 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(MinimumStreamParticipationRatio), "Minimum stream participation ratio must be in the range (0, 1].");
+        }
+
+        if (MinimumStreamBalanceRatio is < 0 or > 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(MinimumStreamBalanceRatio), "Minimum stream balance ratio must be in the range [0, 1].");
+        }
+
+        if (MinimumUploadBytesPerStream < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(MinimumUploadBytesPerStream), "Minimum upload bytes per stream cannot be negative.");
         }
 
         return this;

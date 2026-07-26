@@ -395,7 +395,7 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
                 }
 
                 latestSessionId = result.Session.Id;
-                Status = result.SpeedTests.Any(speed => speed.ResultStatus is not (SpeedResultStatus.Valid or SpeedResultStatus.Degraded))
+                Status = result.SpeedTests.Any(speed => !IsSuccessfulSpeedStatus(speed.ResultStatus))
                     ? "Quick test partial"
                     : "Quick test complete";
                 CurrentOperation = result.Summary;
@@ -901,12 +901,19 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
             : $"{measurement.TargetName} ({measurement.TargetHost})";
 
     private static string FormatMedianLatency(IcmpLatencyStatistics statistics)
-        => statistics.MedianRttMilliseconds is null ? "Unavailable" : $"{statistics.MedianRttMilliseconds:0.0} ms";
+        => statistics.MedianRttMilliseconds is null
+            ? "Unavailable"
+            : statistics.MedianRttMilliseconds < 1
+                ? "<1 ms"
+                : $"{statistics.MedianRttMilliseconds:0.0} ms";
 
     internal static bool IsDisplayableSpeed(SpeedTestMeasurement speedTest)
         => speedTest is { Succeeded: true, MegabitsPerSecond: not null }
-            && (speedTest.ResultStatus is SpeedResultStatus.Valid or SpeedResultStatus.Degraded)
+            && IsSuccessfulSpeedStatus(speedTest.ResultStatus)
             && speedTest.MethodologyVersion == MeasurementMethodology.CurrentVersion;
+
+    internal static bool IsSuccessfulSpeedStatus(string status)
+        => status is SpeedResultStatus.Valid or SpeedResultStatus.Degraded or SpeedResultStatus.DegradedUploadEndpointMayBeLimiting;
 
     private static string FormatSpeed(SpeedTestMeasurement speedTest)
         => IsDisplayableSpeed(speedTest)

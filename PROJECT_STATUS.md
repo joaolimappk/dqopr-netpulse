@@ -27,7 +27,7 @@ Version: `0.3.0-alpha.4`
 ## In Progress
 
 - Hardening production probe behavior across varied Windows networks.
-- Real attended Windows comparison validation of the alpha.4 measurement-correctness milestone.
+- Upload under-reporting investigation after the first real attended Windows comparison.
 
 ## Implemented But Unverified
 
@@ -58,5 +58,6 @@ Version: `0.3.0-alpha.4`
 - Current deterministic local throughput validation uses a controlled loopback HTTP server and verifies that persisted evidence recomputes from global elapsed wall-clock duration and summed stream bytes.
 - Current local Linux-compatible validation: `python3 -m ruff check .` passed; `python3 -m mypy src/dqopr_netpulse` passed; `python3 -m pytest -q` passed, 24 tests with 2 skipped; `git diff --check` passed.
 - Current local .NET validation: `scripts/validate.sh` passed with pinned SDK `10.0.302`; C# tests passed, 37 total; NuGet vulnerability scan found no vulnerable packages.
-- Real attended Windows desktop alpha.4 comparison verification: not yet completed.
+- Real attended Windows desktop comparison on 2026-07-26: NetPulse `178.7/14.0` Mbps, Google `194.5/21.3`, Speedtest.net `209.46/21.58`, Fast.com `210/21`. Download passed the practical +/-15% built-in-estimate comparison. Upload did not pass. Latency targets were not equivalent and must not be directly compared.
+- Upload accuracy verification: still pending another attended Windows comparison after the upload accounting/diagnostic changes.
 - Installer verification: not yet started.

@@ -18,7 +18,7 @@ Alpha.4 changes the measurement model so every displayed value has a scope, targ
 
 | Metric | Source rows | Protocol | Target | Sample count | Formula | Failure handling | Aggregation window | Mixing allowed |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Router latency | `measurements` where `method = Icmp` and `target_name = Local Gateway` | ICMP | Detected default gateway | Current stream, successful samples | Median RTT in ms | Failed probes excluded from RTT, counted as loss | Same session/target/host/address-family/stream | No |
+| Router latency | `measurements` where `method = Icmp` and `target_name = Local Gateway` | ICMP | Detected default gateway | Current stream, successful samples | Median RTT in ms; sub-millisecond .NET Ping values display as `<1 ms` because exact zero RTT is not supported evidence | Failed probes excluded from RTT, counted as loss | Same session/target/host/address-family/stream | No |
 | Internet latency | `measurements` where `method = Icmp` and target is not gateway | ICMP | Displayed target name and host | Current stream, successful samples | Median RTT in ms | Failed probes excluded from RTT, counted as loss | Same session/target/host/address-family/stream | No |
 | Internet jitter | Same rows as displayed internet latency | ICMP | Same displayed internet target | At least 3 successful samples | Mean absolute successive RTT difference in ms | Failed probes excluded from arithmetic | Same session/target/host/address-family/stream | No |
 | ICMP packet loss | `measurements` where `method = Icmp` for displayed target | ICMP | Same displayed internet target | Sent/received/lost counts | `lost / sent * 100` | Failed ICMP rows count as lost | Same target summary | No DNS/TCP/HTTPS |
@@ -79,14 +79,38 @@ Alpha.4 built-in throughput behavior:
 - One synchronized global monotonic measurement window per direction.
 - Mbps formula: `sum(bytes transferred by all workers during the global window) * 8 / global wall-clock seconds / 1,000,000`.
 - Download bytes are counted only after `ReadAsync` returns a positive count before the global deadline.
-- Upload bytes are counted by a custom `HttpContent` only after the HTTP serialization path completes a write during the global window.
+- Upload bytes are counted by a custom `HttpContent` after each request-body write completes during the global window.
+- Upload bytes are added to the measured stream as each request-body write completes during the active window, not only after the HTTP response arrives. Bytes from write buffers that complete after the global deadline are excluded and recorded separately in diagnostics.
 - Setup duration, transfer duration, warmup duration, stream count, HTTP version, status, endpoint, and safe failure fields persisted.
-- Diagnostic JSON stores global start/end timestamps, global elapsed duration, per-stream bytes, worker start/stop offsets, request counts, HTTP status/header evidence, and failure categories.
+- Diagnostic JSON stores global start/end timestamps, global elapsed duration, per-stream bytes, request count, request duration, worker start/stop offsets, HTTP status/version/header evidence, cancellation reason, bytes excluded after deadline, confidence checks, and failure categories.
 - Suspicious results above the configured throughput ceiling are not clamped; they are marked `Invalid result - measurement accounting inconsistency`.
+- Upload diagnostics evaluate confidence from all-stream participation, stream byte balance, endpoint responses, minimum transferred data, full global-duration participation, early completion, and likely flow-control or response-completion stalls.
+- When multi-stream upload evidence indicates endpoint limitation, the row is marked `Degraded - upload endpoint may be limiting throughput` instead of `Valid`. No correction factor or clamp is applied.
+- The current upload strategy uses the configured endpoint only. No fallback endpoint is selected silently; alternate endpoint adoption requires repeat evidence that the candidate is not consistently limited below the access connection.
 
-Rows can have these statuses: `Valid`, `Degraded`, `Endpoint limited`, `Insufficient duration`, `Upload endpoint unavailable`, `Test canceled`, `Invalid result`, `Invalid result - measurement accounting inconsistency`, or `Legacy estimate - methodology version prior to alpha.4`.
+Rows can have these statuses: `Valid`, `Degraded`, `Degraded - upload endpoint may be limiting throughput`, `Endpoint limited`, `Insufficient duration`, `Upload endpoint unavailable`, `Test canceled`, `Invalid result`, `Invalid result - measurement accounting inconsistency`, or `Legacy estimate - methodology version prior to alpha.4`.
 
-Only `Valid` and `Degraded` alpha.4 speed rows are shown as numeric dashboard/history speeds. Legacy, invalid, insufficient-duration, canceled, endpoint-limited, and unavailable rows remain visible in details/exports but are not aggregated as valid speeds.
+Only `Valid`, `Degraded`, and `Degraded - upload endpoint may be limiting throughput` alpha.4 speed rows are shown as numeric dashboard/history speeds. Legacy, invalid, insufficient-duration, canceled, endpoint-limited, and unavailable rows remain visible in details/exports but are not aggregated as valid speeds.
+
+## Real Attended Windows Comparison - 2026-07-26
+
+This was a real attended Windows desktop comparison, run sequentially by a tester against independent web speed-test references. It is not CI smoke evidence.
+
+| Provider | Download Mbps | Upload Mbps | Latency |
+| --- | ---: | ---: | --- |
+| NetPulse | 178.7 | 14.0 | 23.5 ms to Quad9 9.9.9.9 |
+| Google | 194.5 | 21.3 | 19 ms to Miami server |
+| Speedtest.net | 209.46 | 21.58 | 8 ms idle ping to Atlanta server |
+| Fast.com | 210 | 21 | 8 ms unloaded, 9 ms loaded |
+
+Assessment:
+
+- Download passed the practical +/-15% comparison for a built-in estimate.
+- Upload did not pass; NetPulse under-reported by approximately 33-35% against the references.
+- Latency targets were not equivalent and must not be directly compared.
+- Internet jitter and ICMP packet loss looked reasonable in this attended run.
+- Router latency displayed `0.0 ms`; the UI now displays sub-millisecond ICMP RTT evidence as `<1 ms` while retaining the raw stored value.
+- Upload accuracy must not be claimed until the new upload diagnostics are reviewed in another attended Windows comparison.
 
 ## Optional Reference Engine
 
@@ -127,6 +151,6 @@ The diagnostic bundle includes raw ICMP samples, target metadata, timestamps, ca
 ## Remaining Limitations
 
 - The built-in throughput estimate is not ISP-certified and should be compared against independent reference tests.
-- Upload measurement still depends on endpoint behavior and HTTP request completion semantics; endpoint unavailability is reported rather than converted into a numeric speed.
+- Upload measurement still depends on endpoint behavior, request-body consumption, HTTP flow control, and response-completion semantics; endpoint unavailability or suspected endpoint limitation is reported rather than converted into a corrected speed.
 - GitHub-hosted smoke tests validate execution, persistence, UI smoke behavior, and deterministic calculation evidence. They are not speed accuracy validation and must not be used as a trusted reference network.
 - Real attended Windows comparison must still be repeated across at least five idle cycles before claiming accuracy against the acceptance targets.

@@ -143,7 +143,7 @@ public static class HtmlReportGenerator
         => string.Equals(measurement.TargetName, "Local Gateway", StringComparison.OrdinalIgnoreCase);
 
     private static string DisplaySpeed(SpeedTestMeasurement speed)
-        => speed is { Succeeded: true, MegabitsPerSecond: not null } && (speed.ResultStatus is SpeedResultStatus.Valid or SpeedResultStatus.Degraded)
+        => speed is { Succeeded: true, MegabitsPerSecond: not null } && (speed.ResultStatus is SpeedResultStatus.Valid or SpeedResultStatus.Degraded or SpeedResultStatus.DegradedUploadEndpointMayBeLimiting)
             ? $"{speed.MegabitsPerSecond:0.0} Mbps"
             : "unavailable";
 

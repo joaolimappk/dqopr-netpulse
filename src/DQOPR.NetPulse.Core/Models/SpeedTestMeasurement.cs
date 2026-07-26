@@ -27,6 +27,8 @@ public static class SpeedResultStatus
 
     public const string Degraded = "Degraded";
 
+    public const string DegradedUploadEndpointMayBeLimiting = "Degraded - upload endpoint may be limiting throughput";
+
     public const string EndpointLimited = "Endpoint limited";
 
     public const string InsufficientDuration = "Insufficient duration";

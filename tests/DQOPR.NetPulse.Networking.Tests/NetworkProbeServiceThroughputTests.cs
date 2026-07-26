@@ -96,6 +96,11 @@ public sealed class NetworkProbeServiceThroughputTests
         Assert.Equal("global-wall-clock-window", root.GetProperty("timingModel").GetString());
 
         var elapsedMs = root.GetProperty("globalElapsedMs").GetDouble();
+        Assert.True(root.TryGetProperty("confidence", out var confidence));
+        Assert.True(confidence.TryGetProperty("AllStreamsActive", out _));
+        Assert.True(confidence.TryGetProperty("StreamBalanceRatio", out _));
+        Assert.True(confidence.TryGetProperty("BytesExcludedAfterDeadline", out _));
+        Assert.True(confidence.TryGetProperty("SuspectedEndpointLimitation", out _));
         Assert.InRange(elapsedMs, result.ActiveDuration.TotalMilliseconds - 25, result.ActiveDuration.TotalMilliseconds + 25);
         Assert.InRange(
             DateTimeOffset.Parse(root.GetProperty("globalEndUtc").GetString()!, CultureInfo.InvariantCulture)
@@ -113,6 +118,13 @@ public sealed class NetworkProbeServiceThroughputTests
             Assert.InRange(stream.GetProperty("workerStartOffsetMs").GetDouble(), -1, elapsedMs + 25);
             Assert.InRange(stream.GetProperty("workerStopOffsetMs").GetDouble(), -1, elapsedMs + 50);
             Assert.True(stream.GetProperty("RequestCount").GetInt32() >= 1);
+            Assert.True(stream.TryGetProperty("BytesExcludedAfterDeadline", out _));
+            Assert.True(stream.TryGetProperty("CancellationReason", out _));
+            foreach (var response in stream.GetProperty("Responses").EnumerateArray())
+            {
+                Assert.True(response.TryGetProperty("RequestDurationMilliseconds", out _));
+                Assert.True(response.TryGetProperty("RequestBytesWritten", out _));
+            }
         }
     }
 
