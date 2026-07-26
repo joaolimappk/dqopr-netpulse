@@ -63,7 +63,16 @@ public partial class MainWindow : Window
             clock,
             settingsStore,
             defaultSettings,
-            action => Dispatcher.InvokeAsync(action),
+            action =>
+            {
+                if (Dispatcher.CheckAccess())
+                {
+                    action();
+                    return;
+                }
+
+                Dispatcher.Invoke(action);
+            },
             (title, message) => System.Windows.MessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Warning),
             Confirm,
             Close);
