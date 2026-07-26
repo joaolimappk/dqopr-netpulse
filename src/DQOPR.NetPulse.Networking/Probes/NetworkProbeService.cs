@@ -11,17 +11,20 @@ using DQOPR.NetPulse.Diagnostics.Statistics;
 
 namespace DQOPR.NetPulse.Networking.Probes;
 
-public sealed class NetworkProbeService(HttpClient? httpClient = null) : INetworkProbeService, IDisposable
+public sealed class NetworkProbeService : INetworkProbeService, IDisposable
 {
     private const string ProviderName = "NetPulse built-in estimate";
-    private static readonly TimeSpan WarmupDuration = TimeSpan.FromSeconds(1);
-    private static readonly TimeSpan MinimumMeasurementDuration = TimeSpan.FromSeconds(8);
-    private const int ParallelStreamCount = 4;
-    private const int DownloadBufferSize = 128 * 1024;
-    private const int UploadPayloadBytes = 4 * 1024 * 1024;
     private const string UserAgent = "DQOPR-NetPulse/0.3 throughput-estimate";
-    private readonly HttpClient httpClient = httpClient ?? new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
-    private readonly bool ownsHttpClient = httpClient is null;
+    private readonly HttpClient httpClient;
+    private readonly bool ownsHttpClient;
+    private readonly NetworkProbeOptions options;
+
+    public NetworkProbeService(HttpClient? httpClient = null, NetworkProbeOptions? options = null)
+    {
+        this.httpClient = httpClient ?? new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        ownsHttpClient = httpClient is null;
+        this.options = (options ?? new NetworkProbeOptions()).Validate();
+    }
 
     public async Task<ProbeMeasurement> ProbeIcmpAsync(Guid sessionId, TargetDefinition target, int sequence, TimeSpan timeout, CancellationToken cancellationToken)
     {
@@ -154,32 +157,26 @@ public sealed class NetworkProbeService(HttpClient? httpClient = null) : INetwor
         {
             using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutSource.CancelAfter(budget);
-            var warmup = await DownloadStreamAsync(uri, WarmupDuration, 0, timeoutSource.Token).ConfigureAwait(false);
+            var warmup = options.WarmupDuration == TimeSpan.Zero
+                ? ThroughputStreamResult.Success(0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0, TimeSpan.Zero, TimeSpan.Zero, null, TimeSpan.Zero, TimeSpan.Zero, 0, [])
+                : await DownloadWarmupAsync(uri, timeoutSource.Token).ConfigureAwait(false);
             var measurementDuration = MeasurementDuration(budget, warmup.Elapsed);
-            var streams = await Task.WhenAll(Enumerable.Range(0, ParallelStreamCount)
-                .Select(index => DownloadStreamAsync(uri, measurementDuration, index + 1, timeoutSource.Token))).ConfigureAwait(false);
+            var result = await RunGlobalWindowAsync(
+                "download",
+                uri,
+                measurementDuration,
+                index => DownloadWorkerAsync(uri, index, timeoutSource.Token),
+                timeoutSource.Token).ConfigureAwait(false);
 
-            var usable = streams.Where(stream => stream.BytesTransferred > 0 && stream.TransferDuration > TimeSpan.Zero).ToArray();
-            var failed = streams.Where(stream => !stream.Succeeded).ToArray();
-            if (usable.Length == 0)
-            {
-                var firstFailure = failed.FirstOrDefault();
-                return FailedSpeed(sessionId, observedAt, "download", budget, uri, SpeedResultStatus.InvalidResult, firstFailure?.FailureCategory ?? "NoBytes", firstFailure?.FailureMessage ?? "Download endpoint produced no measurable bytes.", warmup, streams);
-            }
-
-            var bytes = usable.Sum(stream => stream.BytesTransferred);
-            var transferDuration = usable.Max(stream => stream.TransferDuration);
-            var setupDuration = TimeSpan.FromMilliseconds(usable.Average(stream => stream.SetupDuration.TotalMilliseconds));
-            var status = ThroughputCalculator.Classify(anySucceeded: true, anyFailed: failed.Length > 0, transferDuration, MinimumMeasurementDuration);
-            return SpeedResult(sessionId, observedAt, "download", status == SpeedResultStatus.Valid || status == SpeedResultStatus.Degraded, bytes, setupDuration, transferDuration, WarmupDuration, uri, status, null, null, streams);
+            return SpeedResult(sessionId, observedAt, "download", uri, result, warmup);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return FailedSpeed(sessionId, observedAt, "download", budget, uri, SpeedResultStatus.TestCanceled, "Timeout", "Download throughput estimate timed out.", null, []);
+            return FailedSpeed(sessionId, observedAt, "download", budget, uri, SpeedResultStatus.TestCanceled, "Timeout", "Download throughput estimate timed out.", null, null);
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException)
         {
-            return FailedSpeed(sessionId, observedAt, "download", budget, uri, SpeedResultStatus.InvalidResult, ex.GetType().Name, ex.Message, null, []);
+            return FailedSpeed(sessionId, observedAt, "download", budget, uri, SpeedResultStatus.InvalidResult, ex.GetType().Name, ex.Message, null, null);
         }
     }
 
@@ -191,174 +188,359 @@ public sealed class NetworkProbeService(HttpClient? httpClient = null) : INetwor
         {
             using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutSource.CancelAfter(budget);
-            var payload = RandomPayload(UploadPayloadBytes);
-            var warmup = await UploadStreamAsync(uri, payload, WarmupDuration, 0, timeoutSource.Token).ConfigureAwait(false);
+            var payload = RandomPayload(options.UploadPayloadBytes);
+            var warmup = options.WarmupDuration == TimeSpan.Zero
+                ? ThroughputStreamResult.Success(0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0, TimeSpan.Zero, TimeSpan.Zero, null, TimeSpan.Zero, TimeSpan.Zero, 0, [])
+                : await UploadWarmupAsync(uri, payload, timeoutSource.Token).ConfigureAwait(false);
             var measurementDuration = MeasurementDuration(budget, warmup.Elapsed);
-            var streams = await Task.WhenAll(Enumerable.Range(0, ParallelStreamCount)
-                .Select(index => UploadStreamAsync(uri, payload, measurementDuration, index + 1, timeoutSource.Token))).ConfigureAwait(false);
+            var result = await RunGlobalWindowAsync(
+                "upload",
+                uri,
+                measurementDuration,
+                index => UploadWorkerAsync(uri, payload, index, timeoutSource.Token),
+                timeoutSource.Token).ConfigureAwait(false);
 
-            var usable = streams.Where(stream => stream.BytesTransferred > 0 && stream.TransferDuration > TimeSpan.Zero).ToArray();
-            var failed = streams.Where(stream => !stream.Succeeded).ToArray();
-            if (usable.Length == 0)
-            {
-                var firstFailure = failed.FirstOrDefault();
-                return FailedSpeed(sessionId, observedAt, "upload", budget, uri, SpeedResultStatus.UploadEndpointUnavailable, firstFailure?.FailureCategory ?? "NoBytes", firstFailure?.FailureMessage ?? "Upload endpoint produced no measurable bytes.", warmup, streams);
-            }
-
-            var bytes = usable.Sum(stream => stream.BytesTransferred);
-            var transferDuration = usable.Max(stream => stream.TransferDuration);
-            var setupDuration = TimeSpan.FromMilliseconds(usable.Average(stream => stream.SetupDuration.TotalMilliseconds));
-            var status = ThroughputCalculator.Classify(anySucceeded: true, anyFailed: failed.Length > 0, transferDuration, MinimumMeasurementDuration, uploadEndpointUnavailable: true);
-            return SpeedResult(sessionId, observedAt, "upload", status == SpeedResultStatus.Valid || status == SpeedResultStatus.Degraded, bytes, setupDuration, transferDuration, WarmupDuration, uri, status, null, null, streams);
+            return SpeedResult(sessionId, observedAt, "upload", uri, result, warmup);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return FailedSpeed(sessionId, observedAt, "upload", budget, uri, SpeedResultStatus.TestCanceled, "Timeout", "Upload throughput estimate timed out.", null, []);
+            return FailedSpeed(sessionId, observedAt, "upload", budget, uri, SpeedResultStatus.TestCanceled, "Timeout", "Upload throughput estimate timed out.", null, null);
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException)
         {
-            return FailedSpeed(sessionId, observedAt, "upload", budget, uri, SpeedResultStatus.UploadEndpointUnavailable, ex.GetType().Name, ex.Message, null, []);
+            return FailedSpeed(sessionId, observedAt, "upload", budget, uri, SpeedResultStatus.UploadEndpointUnavailable, ex.GetType().Name, ex.Message, null, null);
         }
     }
 
-    private async Task<ThroughputStreamResult> DownloadStreamAsync(Uri uri, TimeSpan duration, int streamIndex, CancellationToken cancellationToken)
+    private async Task<ThroughputWindowResult> RunGlobalWindowAsync(
+        string direction,
+        Uri uri,
+        TimeSpan duration,
+        Func<int, Task<ThroughputStreamResult>> workerFactory,
+        CancellationToken cancellationToken)
+    {
+        var window = new ThroughputWindow(duration);
+        using var windowScope = window.Enter();
+        var ready = 0;
+        var startGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tasks = Enumerable.Range(1, options.ParallelStreamCount)
+            .Select(index => WorkerAfterGateAsync(index))
+            .ToArray();
+
+        while (Volatile.Read(ref ready) < options.ParallelStreamCount)
+        {
+            await Task.Delay(5, cancellationToken).ConfigureAwait(false);
+        }
+
+        window.Start();
+        startGate.SetResult();
+        await Task.WhenAll(tasks).ConfigureAwait(false);
+        window.Stop();
+
+        var streams = tasks.Select(task => task.Result).ToArray();
+        var bytes = streams.Sum(stream => stream.BytesTransferred);
+        var setupDuration = streams.Length == 0
+            ? TimeSpan.Zero
+            : TimeSpan.FromMilliseconds(streams.Average(stream => stream.SetupDuration.TotalMilliseconds));
+        var failure = ValidateThroughput(direction, bytes, window.Elapsed, streams);
+        var failed = streams.Where(stream => !stream.Succeeded).ToArray();
+        var status = failure is not null
+            ? SpeedResultStatus.MeasurementAccountingInconsistency
+            : ThroughputCalculator.Classify(anySucceeded: bytes > 0, anyFailed: failed.Length > 0, window.Elapsed, options.MinimumMeasurementDuration, uploadEndpointUnavailable: direction == "upload" && bytes == 0);
+
+        return new ThroughputWindowResult(
+            window.StartedAtUtc,
+            window.EndedAtUtc,
+            window.Elapsed,
+            bytes,
+            setupDuration,
+            status,
+            failure?.Category ?? failed.FirstOrDefault()?.FailureCategory,
+            failure?.Message ?? failed.FirstOrDefault()?.FailureMessage,
+            streams);
+
+        async Task<ThroughputStreamResult> WorkerAfterGateAsync(int index)
+        {
+            Interlocked.Increment(ref ready);
+            await startGate.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return await workerFactory(index).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<ThroughputStreamResult> DownloadWarmupAsync(Uri uri, CancellationToken cancellationToken)
+    {
+        var startedAt = DateTimeOffset.UtcNow;
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            using var request = BuildDownloadRequest(uri, 0, 0);
+            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            var buffer = new byte[options.DownloadBufferSize];
+            while (stopwatch.Elapsed < options.WarmupDuration)
+            {
+                var read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+            }
+
+            stopwatch.Stop();
+            var headers = ResponseEvidence.From(response);
+            return response.IsSuccessStatusCode
+                ? ThroughputStreamResult.Success(0, startedAt, DateTimeOffset.UtcNow, 0, stopwatch.Elapsed, TimeSpan.Zero, response.Version.ToString(), TimeSpan.Zero, stopwatch.Elapsed, 1, [headers])
+                : ThroughputStreamResult.Failed(0, startedAt, DateTimeOffset.UtcNow, 0, stopwatch.Elapsed, TimeSpan.Zero, $"HTTP {(int)response.StatusCode}", response.ReasonPhrase ?? "Download warmup failed.", response.Version.ToString(), TimeSpan.Zero, stopwatch.Elapsed, 1, [headers]);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException)
+        {
+            stopwatch.Stop();
+            return ThroughputStreamResult.Failed(0, startedAt, DateTimeOffset.UtcNow, 0, stopwatch.Elapsed, TimeSpan.Zero, ex.GetType().Name, ex.Message, null, TimeSpan.Zero, stopwatch.Elapsed, 1, []);
+        }
+    }
+
+    private async Task<ThroughputStreamResult> DownloadWorkerAsync(Uri uri, int streamIndex, CancellationToken cancellationToken)
     {
         var startedAt = DateTimeOffset.UtcNow;
         var setupDuration = TimeSpan.Zero;
-        var transferDuration = TimeSpan.Zero;
+        var startedOffset = ThroughputWindow.Current!.Elapsed;
+        var stoppedOffset = startedOffset;
         long bytes = 0;
         var requestIndex = 0;
         string? httpVersion = null;
+        var responses = new List<ResponseEvidence>();
         try
         {
-            while (transferDuration < duration)
+            while (!ThroughputWindow.Current.IsExpired && !cancellationToken.IsCancellationRequested)
             {
                 requestIndex++;
-                var endpoint = CacheBusted(uri, streamIndex, requestIndex);
                 var setup = Stopwatch.StartNew();
-                using var request = new HttpRequestMessage(HttpMethod.Get, endpoint) { VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher };
-                request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
-                request.Headers.AcceptEncoding.Clear();
-                request.Headers.TryAddWithoutValidation("Accept-Encoding", "identity");
-                request.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
-                using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                using var request = BuildDownloadRequest(uri, streamIndex, requestIndex);
+                using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ThroughputWindow.Current.CancellationToken).ConfigureAwait(false);
                 setup.Stop();
                 setupDuration += setup.Elapsed;
                 httpVersion = response.Version.ToString();
+                responses.Add(ResponseEvidence.From(response));
                 if (!response.IsSuccessStatusCode)
                 {
-                    return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setupDuration, transferDuration, $"HTTP {(int)response.StatusCode}", response.ReasonPhrase ?? "Download endpoint returned an invalid status.", httpVersion);
+                    stoppedOffset = ThroughputWindow.Current.Elapsed;
+                    return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setupDuration, stoppedOffset - startedOffset, $"HTTP {(int)response.StatusCode}", response.ReasonPhrase ?? "Download endpoint returned an invalid status.", httpVersion, startedOffset, stoppedOffset, requestIndex, responses);
                 }
 
-                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-                var buffer = new byte[DownloadBufferSize];
-                var transfer = Stopwatch.StartNew();
-                while (transferDuration + transfer.Elapsed < duration)
+                await using var stream = await response.Content.ReadAsStreamAsync(ThroughputWindow.Current.CancellationToken).ConfigureAwait(false);
+                var buffer = new byte[options.DownloadBufferSize];
+                while (!ThroughputWindow.Current.IsExpired)
                 {
-                    var read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                    var read = await stream.ReadAsync(buffer, ThroughputWindow.Current.CancellationToken).ConfigureAwait(false);
                     if (read == 0)
                     {
                         break;
                     }
 
-                    bytes += read;
+                    if (!ThroughputWindow.Current.IsExpired)
+                    {
+                        bytes += read;
+                    }
                 }
-
-                transfer.Stop();
-                transferDuration += transfer.Elapsed;
             }
 
-            return ThroughputStreamResult.Success(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setupDuration, transferDuration, httpVersion);
+            stoppedOffset = ThroughputWindow.Current.Elapsed;
+            return ThroughputStreamResult.Success(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setupDuration, stoppedOffset - startedOffset, httpVersion, startedOffset, stoppedOffset, requestIndex, responses);
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException)
         {
-            return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setupDuration, transferDuration, ex.GetType().Name, ex.Message, httpVersion);
+            stoppedOffset = ThroughputWindow.Current?.Elapsed ?? stoppedOffset;
+            return bytes > 0 && ThroughputWindow.Current?.IsExpired == true
+                ? ThroughputStreamResult.Success(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setupDuration, stoppedOffset - startedOffset, httpVersion, startedOffset, stoppedOffset, requestIndex, responses)
+                : ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setupDuration, stoppedOffset - startedOffset, ex.GetType().Name, ex.Message, httpVersion, startedOffset, stoppedOffset, requestIndex, responses);
         }
     }
 
-    private async Task<ThroughputStreamResult> UploadStreamAsync(Uri uri, byte[] payload, TimeSpan duration, int streamIndex, CancellationToken cancellationToken)
+    private async Task<ThroughputStreamResult> UploadWarmupAsync(Uri uri, byte[] payload, CancellationToken cancellationToken)
+    {
+        var startedAt = DateTimeOffset.UtcNow;
+        var setup = Stopwatch.StartNew();
+        try
+        {
+            using var request = BuildUploadRequest(uri, payload, 0, 0, null, null);
+            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            setup.Stop();
+            var headers = ResponseEvidence.From(response);
+            return response.IsSuccessStatusCode
+                ? ThroughputStreamResult.Success(0, startedAt, DateTimeOffset.UtcNow, 0, setup.Elapsed, TimeSpan.Zero, response.Version.ToString(), TimeSpan.Zero, setup.Elapsed, 1, [headers])
+                : ThroughputStreamResult.Failed(0, startedAt, DateTimeOffset.UtcNow, 0, setup.Elapsed, TimeSpan.Zero, $"HTTP {(int)response.StatusCode}", response.ReasonPhrase ?? "Upload warmup failed.", response.Version.ToString(), TimeSpan.Zero, setup.Elapsed, 1, [headers]);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException)
+        {
+            setup.Stop();
+            return ThroughputStreamResult.Failed(0, startedAt, DateTimeOffset.UtcNow, 0, setup.Elapsed, TimeSpan.Zero, ex.GetType().Name, ex.Message, null, TimeSpan.Zero, setup.Elapsed, 1, []);
+        }
+    }
+
+    private async Task<ThroughputStreamResult> UploadWorkerAsync(Uri uri, byte[] payload, int streamIndex, CancellationToken cancellationToken)
     {
         long bytes = 0;
         var setup = TimeSpan.Zero;
         var startedAt = DateTimeOffset.UtcNow;
-        var transfer = Stopwatch.StartNew();
+        var startedOffset = ThroughputWindow.Current!.Elapsed;
+        var stoppedOffset = startedOffset;
+        var requestIndex = 0;
+        var responses = new List<ResponseEvidence>();
         try
         {
-            while (transfer.Elapsed < duration)
+            while (!ThroughputWindow.Current.IsExpired && !cancellationToken.IsCancellationRequested)
             {
-                var endpoint = CacheBusted(uri, streamIndex, bytes / payload.LongLength);
+                requestIndex++;
                 var setupWatch = Stopwatch.StartNew();
-                using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher };
-                request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
-                request.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
-                request.Content = new ByteArrayContent(payload);
-                request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
-                using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                long requestBytes = 0;
+                using var request = BuildUploadRequest(uri, payload, streamIndex, requestIndex, ThroughputWindow.Current, written => requestBytes += written);
+                using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ThroughputWindow.Current.CancellationToken).ConfigureAwait(false);
                 setupWatch.Stop();
                 setup += setupWatch.Elapsed;
+                bytes += requestBytes;
+                responses.Add(ResponseEvidence.From(response));
                 if (!response.IsSuccessStatusCode)
                 {
-                    transfer.Stop();
-                    return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup, transfer.Elapsed, $"HTTP {(int)response.StatusCode}", response.ReasonPhrase ?? "Upload endpoint rejected the payload.", response.Version.ToString());
+                    stoppedOffset = ThroughputWindow.Current.Elapsed;
+                    return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup, stoppedOffset - startedOffset, $"HTTP {(int)response.StatusCode}", response.ReasonPhrase ?? "Upload endpoint rejected the payload.", response.Version.ToString(), startedOffset, stoppedOffset, requestIndex, responses);
                 }
-
-                bytes += payload.LongLength;
             }
 
-            transfer.Stop();
-            return ThroughputStreamResult.Success(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup, transfer.Elapsed, null);
+            stoppedOffset = ThroughputWindow.Current.Elapsed;
+            return ThroughputStreamResult.Success(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup, stoppedOffset - startedOffset, responses.LastOrDefault()?.HttpVersion, startedOffset, stoppedOffset, requestIndex, responses);
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException)
         {
-            transfer.Stop();
-            return ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup, transfer.Elapsed, ex.GetType().Name, ex.Message, null);
+            stoppedOffset = ThroughputWindow.Current?.Elapsed ?? stoppedOffset;
+            return bytes > 0 && ThroughputWindow.Current?.IsExpired == true
+                ? ThroughputStreamResult.Success(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup, stoppedOffset - startedOffset, responses.LastOrDefault()?.HttpVersion, startedOffset, stoppedOffset, requestIndex, responses)
+                : ThroughputStreamResult.Failed(streamIndex, startedAt, DateTimeOffset.UtcNow, bytes, setup, stoppedOffset - startedOffset, ex.GetType().Name, ex.Message, responses.LastOrDefault()?.HttpVersion, startedOffset, stoppedOffset, requestIndex, responses);
         }
     }
 
-    private static SpeedTestMeasurement SpeedResult(Guid sessionId, DateTimeOffset observedAt, string direction, bool succeeded, long bytes, TimeSpan setupDuration, TimeSpan transferDuration, TimeSpan warmupDuration, Uri uri, string status, string? category, string? message, IReadOnlyList<ThroughputStreamResult> streams)
+    private SpeedTestMeasurement SpeedResult(Guid sessionId, DateTimeOffset observedAt, string direction, Uri uri, ThroughputWindowResult result, ThroughputStreamResult warmup)
     {
-        var mbps = succeeded ? ThroughputCalculator.MegabitsPerSecond(bytes, transferDuration) : null;
+        var succeeded = result.ResultStatus is SpeedResultStatus.Valid or SpeedResultStatus.Degraded;
+        var mbps = succeeded ? ThroughputCalculator.MegabitsPerSecond(result.BytesTransferred, result.Elapsed) : null;
         var diagnostic = JsonSerializer.Serialize(new
         {
             methodology = MeasurementMethodology.CurrentVersion,
             provider = ProviderName,
             direction,
             endpoint = uri.Host,
-            streamCount = ParallelStreamCount,
-            bytesTransferred = bytes,
-            setupDurationMs = setupDuration.TotalMilliseconds,
-            transferDurationMs = transferDuration.TotalMilliseconds,
-            warmupDurationMs = warmupDuration.TotalMilliseconds,
-            resultStatus = status,
-            streams = streams.Select(stream => new
+            timingModel = "global-wall-clock-window",
+            streamCount = options.ParallelStreamCount,
+            maximumCredibleMegabitsPerSecond = options.MaximumCredibleMegabitsPerSecond,
+            globalStartUtc = result.StartedAtUtc,
+            globalEndUtc = result.EndedAtUtc,
+            globalElapsedMs = result.Elapsed.TotalMilliseconds,
+            bytesTransferred = result.BytesTransferred,
+            setupDurationMs = result.SetupDuration.TotalMilliseconds,
+            transferDurationMs = result.Elapsed.TotalMilliseconds,
+            warmupDurationMs = warmup.Elapsed.TotalMilliseconds,
+            resultStatus = result.ResultStatus,
+            failureCategory = result.FailureCategory,
+            failureMessage = result.FailureMessage,
+            warmup = new
+            {
+                warmup.Succeeded,
+                warmup.SetupDuration,
+                warmup.TransferDuration,
+                warmup.FailureCategory,
+                warmup.FailureMessage,
+                warmup.Responses
+            },
+            streams = result.Streams.Select(stream => new
             {
                 stream.StreamIndex,
                 stream.StartedAt,
                 stream.EndedAt,
                 stream.Succeeded,
                 stream.BytesTransferred,
+                workerStartOffsetMs = stream.WorkerStartOffset.TotalMilliseconds,
+                workerStopOffsetMs = stream.WorkerStopOffset.TotalMilliseconds,
+                stream.RequestCount,
                 setupDurationMs = stream.SetupDuration.TotalMilliseconds,
                 transferDurationMs = stream.TransferDuration.TotalMilliseconds,
                 stream.HttpVersion,
                 stream.FailureCategory,
-                stream.FailureMessage
+                stream.FailureMessage,
+                stream.Responses
             })
         });
-        return new SpeedTestMeasurement(sessionId, observedAt, direction, succeeded, mbps, bytes, transferDuration, ProviderName, uri.ToString(), category, message, status, setupDuration, transferDuration, warmupDuration, ParallelStreamCount, streams.FirstOrDefault(stream => stream.HttpVersion is not null)?.HttpVersion, MeasurementMethodology.CurrentVersion, diagnostic);
+        return new SpeedTestMeasurement(sessionId, observedAt, direction, succeeded, mbps, result.BytesTransferred, result.Elapsed, ProviderName, uri.ToString(), result.FailureCategory, result.FailureMessage, result.ResultStatus, result.SetupDuration, result.Elapsed, warmup.Elapsed, options.ParallelStreamCount, result.Streams.FirstOrDefault(stream => stream.HttpVersion is not null)?.HttpVersion, MeasurementMethodology.CurrentVersion, diagnostic);
     }
 
-    private static SpeedTestMeasurement FailedSpeed(Guid sessionId, DateTimeOffset observedAt, string direction, TimeSpan duration, Uri uri, string status, string category, string message, ThroughputStreamResult? warmup, IReadOnlyList<ThroughputStreamResult> streams)
-        => SpeedResult(sessionId, observedAt, direction, false, streams.Where(stream => stream.Succeeded).Sum(stream => stream.BytesTransferred), TimeSpan.Zero, duration, warmup is null ? TimeSpan.Zero : WarmupDuration, uri, status, category, message, streams);
+    private SpeedTestMeasurement FailedSpeed(Guid sessionId, DateTimeOffset observedAt, string direction, TimeSpan duration, Uri uri, string status, string category, string message, ThroughputStreamResult? warmup, IReadOnlyList<ThroughputStreamResult>? streams)
+    {
+        var result = new ThroughputWindowResult(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, duration, streams?.Sum(stream => stream.BytesTransferred) ?? 0, TimeSpan.Zero, status, category, message, streams ?? []);
+        var warmupResult = warmup ?? ThroughputStreamResult.Failed(0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0, TimeSpan.Zero, TimeSpan.Zero, "NotRun", "Warmup did not run.", null, TimeSpan.Zero, TimeSpan.Zero, 0, []);
+        return SpeedResult(sessionId, observedAt, direction, uri, result, warmupResult);
+    }
 
-    private static TimeSpan MeasurementDuration(TimeSpan budget, TimeSpan elapsedWarmup)
+    private TimeSpan MeasurementDuration(TimeSpan budget, TimeSpan elapsedWarmup)
     {
         var remaining = budget - elapsedWarmup - TimeSpan.FromSeconds(2);
-        if (remaining < MinimumMeasurementDuration)
+        if (remaining < options.MinimumMeasurementDuration)
         {
             return remaining > TimeSpan.FromSeconds(1) ? remaining : TimeSpan.FromSeconds(1);
         }
 
-        return remaining > TimeSpan.FromSeconds(12) ? TimeSpan.FromSeconds(12) : remaining;
+        return remaining > options.TargetMeasurementDuration ? options.TargetMeasurementDuration : remaining;
+    }
+
+    private ThroughputValidationFailure? ValidateThroughput(string direction, long bytes, TimeSpan elapsed, IReadOnlyList<ThroughputStreamResult> streams)
+    {
+        if (elapsed <= TimeSpan.Zero || double.IsNaN(elapsed.TotalSeconds))
+        {
+            return new("ZeroOrInvalidDuration", "Global measured duration was zero or invalid.");
+        }
+
+        var mbps = ThroughputCalculator.MegabitsPerSecond(bytes, elapsed);
+        if (mbps is not null && mbps > options.MaximumCredibleMegabitsPerSecond)
+        {
+            return new("SuspiciousThroughputCeiling", $"{direction} estimate {mbps:0.000} Mbps exceeds configured ceiling {options.MaximumCredibleMegabitsPerSecond:0.000} Mbps.");
+        }
+
+        if (streams.Any(stream => stream.WorkerStartOffset < TimeSpan.Zero || stream.WorkerStopOffset - stream.WorkerStartOffset > elapsed + TimeSpan.FromMilliseconds(50)))
+        {
+            return new("WorkerDurationOutsideGlobalWindow", "At least one worker recorded a duration outside the global measurement window.");
+        }
+
+        if (streams.Any(stream => stream.BytesTransferred > bytes))
+        {
+            return new("StreamBytesExceedTotal", "A stream byte count exceeds the total byte count.");
+        }
+
+        if (bytes != streams.Sum(stream => stream.BytesTransferred))
+        {
+            return new("ByteSumMismatch", "Total bytes do not match the sum of stream bytes.");
+        }
+
+        return null;
+    }
+
+    private static HttpRequestMessage BuildDownloadRequest(Uri uri, int streamIndex, long requestIndex)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, CacheBusted(uri, streamIndex, requestIndex)) { VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher };
+        request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+        request.Headers.AcceptEncoding.Clear();
+        request.Headers.TryAddWithoutValidation("Accept-Encoding", "identity");
+        request.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
+        return request;
+    }
+
+    private HttpRequestMessage BuildUploadRequest(Uri uri, byte[] payload, int streamIndex, long requestIndex, ThroughputWindow? window, Action<long>? countBytes)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, CacheBusted(uri, streamIndex, requestIndex)) { VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher };
+        request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true };
+        request.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
+        request.Headers.ExpectContinue = false;
+        request.Content = countBytes is null
+            ? new ByteArrayContent(payload)
+            : new CountingUploadContent(payload, options.UploadBufferSize, window ?? throw new InvalidOperationException("A throughput window is required for measured uploads."), countBytes);
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        return request;
     }
 
     private static Uri CacheBusted(Uri uri, int streamIndex, long requestIndex)
@@ -387,6 +569,19 @@ public sealed class NetworkProbeService(HttpClient? httpClient = null) : INetwor
     private static string ProbeStreamId(Guid sessionId, TargetDefinition target, string addressFamily)
         => $"{sessionId}:icmp:{target.Name}:{target.Host}:{addressFamily}";
 
+    private sealed record ThroughputWindowResult(
+        DateTimeOffset StartedAtUtc,
+        DateTimeOffset EndedAtUtc,
+        TimeSpan Elapsed,
+        long BytesTransferred,
+        TimeSpan SetupDuration,
+        string ResultStatus,
+        string? FailureCategory,
+        string? FailureMessage,
+        IReadOnlyList<ThroughputStreamResult> Streams);
+
+    private sealed record ThroughputValidationFailure(string Category, string Message);
+
     private sealed record ThroughputStreamResult(
         int StreamIndex,
         DateTimeOffset StartedAt,
@@ -397,14 +592,123 @@ public sealed class NetworkProbeService(HttpClient? httpClient = null) : INetwor
         TimeSpan TransferDuration,
         string? HttpVersion,
         string? FailureCategory,
-        string? FailureMessage)
+        string? FailureMessage,
+        TimeSpan WorkerStartOffset,
+        TimeSpan WorkerStopOffset,
+        int RequestCount,
+        IReadOnlyList<ResponseEvidence> Responses)
     {
         public TimeSpan Elapsed => SetupDuration + TransferDuration;
 
-        public static ThroughputStreamResult Success(int streamIndex, DateTimeOffset startedAt, DateTimeOffset endedAt, long bytesTransferred, TimeSpan setupDuration, TimeSpan transferDuration, string? httpVersion)
-            => new(streamIndex, startedAt, endedAt, true, bytesTransferred, setupDuration, transferDuration, httpVersion, null, null);
+        public static ThroughputStreamResult Success(int streamIndex, DateTimeOffset startedAt, DateTimeOffset endedAt, long bytesTransferred, TimeSpan setupDuration, TimeSpan transferDuration, string? httpVersion, TimeSpan workerStartOffset, TimeSpan workerStopOffset, int requestCount, IReadOnlyList<ResponseEvidence> responses)
+            => new(streamIndex, startedAt, endedAt, true, bytesTransferred, setupDuration, transferDuration, httpVersion, null, null, workerStartOffset, workerStopOffset, requestCount, responses);
 
-        public static ThroughputStreamResult Failed(int streamIndex, DateTimeOffset startedAt, DateTimeOffset endedAt, long bytesTransferred, TimeSpan setupDuration, TimeSpan transferDuration, string failureCategory, string failureMessage, string? httpVersion)
-            => new(streamIndex, startedAt, endedAt, false, bytesTransferred, setupDuration, transferDuration, httpVersion, failureCategory, failureMessage);
+        public static ThroughputStreamResult Failed(int streamIndex, DateTimeOffset startedAt, DateTimeOffset endedAt, long bytesTransferred, TimeSpan setupDuration, TimeSpan transferDuration, string failureCategory, string failureMessage, string? httpVersion, TimeSpan workerStartOffset, TimeSpan workerStopOffset, int requestCount, IReadOnlyList<ResponseEvidence> responses)
+            => new(streamIndex, startedAt, endedAt, false, bytesTransferred, setupDuration, transferDuration, httpVersion, failureCategory, failureMessage, workerStartOffset, workerStopOffset, requestCount, responses);
+    }
+
+    private sealed record ResponseEvidence(
+        int StatusCode,
+        string? ReasonPhrase,
+        string HttpVersion,
+        long? ContentLength,
+        string? ContentEncoding,
+        string? Age,
+        string? Via,
+        string? XCache)
+    {
+        public static ResponseEvidence From(HttpResponseMessage response)
+            => new(
+                (int)response.StatusCode,
+                response.ReasonPhrase,
+                response.Version.ToString(),
+                response.Content.Headers.ContentLength,
+                string.Join(",", response.Content.Headers.ContentEncoding),
+                response.Headers.TryGetValues("Age", out var age) ? string.Join(",", age) : null,
+                response.Headers.TryGetValues("Via", out var via) ? string.Join(",", via) : null,
+                response.Headers.TryGetValues("X-Cache", out var cache) ? string.Join(",", cache) : null);
+    }
+
+    private sealed class ThroughputWindow : IDisposable
+    {
+        private static readonly AsyncLocal<ThroughputWindow?> CurrentWindow = new();
+        private readonly CancellationTokenSource deadlineSource = new();
+        private readonly TimeSpan duration;
+        private readonly Stopwatch stopwatch = new();
+
+        public ThroughputWindow(TimeSpan duration)
+        {
+            this.duration = duration;
+        }
+
+        public static ThroughputWindow? Current => CurrentWindow.Value;
+
+        public DateTimeOffset StartedAtUtc { get; private set; }
+
+        public DateTimeOffset EndedAtUtc { get; private set; }
+
+        public TimeSpan Elapsed => stopwatch.Elapsed;
+
+        public CancellationToken CancellationToken => deadlineSource.Token;
+
+        public bool IsExpired => deadlineSource.IsCancellationRequested || stopwatch.Elapsed >= duration;
+
+        public IDisposable Enter()
+        {
+            CurrentWindow.Value = this;
+            return this;
+        }
+
+        public void Start()
+        {
+            StartedAtUtc = DateTimeOffset.UtcNow;
+            stopwatch.Start();
+            deadlineSource.CancelAfter(duration);
+        }
+
+        public void Stop()
+        {
+            if (stopwatch.IsRunning)
+            {
+                stopwatch.Stop();
+            }
+
+            EndedAtUtc = StartedAtUtc + stopwatch.Elapsed;
+        }
+
+        public void Dispose()
+        {
+            CurrentWindow.Value = null;
+            deadlineSource.Dispose();
+        }
+    }
+
+    private sealed class CountingUploadContent(byte[] payload, int bufferSize, ThroughputWindow window, Action<long> countBytes) : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+            => SerializeToStreamAsync(stream, context, CancellationToken.None);
+
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken cancellationToken)
+        {
+            var offset = 0;
+            while (offset < payload.Length && !window.IsExpired && !cancellationToken.IsCancellationRequested)
+            {
+                var count = Math.Min(bufferSize, payload.Length - offset);
+                await stream.WriteAsync(payload.AsMemory(offset, count), cancellationToken).ConfigureAwait(false);
+                if (window.IsExpired)
+                {
+                    break;
+                }
+
+                countBytes(count);
+                offset += count;
+            }
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = payload.LongLength;
+            return true;
+        }
     }
 }

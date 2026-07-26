@@ -37,5 +37,7 @@ public static class SpeedResultStatus
 
     public const string InvalidResult = "Invalid result";
 
+    public const string MeasurementAccountingInconsistency = "Invalid result - measurement accounting inconsistency";
+
     public const string LegacyEstimate = "Legacy estimate - methodology version prior to alpha.4";
 }

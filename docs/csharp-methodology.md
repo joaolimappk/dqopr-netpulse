@@ -60,7 +60,13 @@ The expected Quick Test stage order is: detecting network, testing router, testi
 
 ## Throughput Validity
 
-Built-in speed rows must include provider, endpoint, actual bytes, active/setup/transfer/warmup durations, stream count, HTTP version, status, methodology version, and safe failure details.
+Built-in speed rows must include provider, endpoint, actual bytes, global active/setup/transfer/warmup durations, stream count, HTTP version, status, methodology version, and safe failure details.
+
+Download and upload Mbps must be calculated from one synchronized global measurement window:
+
+`sum(bytes transferred by all workers during the global window) * 8 / global wall-clock seconds / 1,000,000`
+
+Per-stream active read/write durations are diagnostic evidence only and must not replace the global denominator. GitHub-hosted runners validate execution and evidence capture only; they are not reference networks for accuracy claims.
 
 Only `Valid` and `Degraded` rows from the current methodology may be displayed as numeric dashboard/history speeds. Invalid, insufficient-duration, canceled, endpoint-limited, unavailable, and legacy rows remain visible as evidence but are not aggregated into valid speed summaries.
 

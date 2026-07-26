@@ -34,7 +34,7 @@ Version: `0.3.0-alpha.4`
 - WPF dashboard, History, Session Details, Reports, Settings, Activity Log, and About are wired to the view model and passed GitHub Windows runner smoke validation.
 - SQLite persistence stores/retrieves sessions, probe measurements, speed tests, and interface events in tests, but not yet tested under multi-day sessions.
 - Schedule logic is integrated into a running monitor and unit tested with fakes.
-- Built-in throughput estimate is implemented with alpha.4 validity metadata and passed GitHub Windows runner smoke validation, but it is not an ISP-certified speed test.
+- Built-in throughput estimate is implemented with alpha.4 validity metadata and a global wall-clock measurement window, but it is not an ISP-certified speed test.
 
 ## Blocked
 
@@ -51,11 +51,10 @@ Version: `0.3.0-alpha.4`
 
 ## Latest Verification
 
-- Current verified GitHub Actions run `30164232273`: passed on `windows-latest` for commit `10223ad5b493d681a058af83a59a02ec90392525`, built, tested, published WPF app artifact `dqopr-netpulse-csharp-win-x64`, and uploaded smoke evidence artifact `dqopr-netpulse-csharp-smoke-evidence`.
-- Current smoke evidence artifact `dqopr-netpulse-csharp-smoke-evidence`: verified locally after download; includes `active-monitoring.png`, `dashboard.png`, `quick-test-complete.png`, `history.png`, `session-details.png`, `reports.png`, `settings.png`, `activity-log.png`, `about.png`, `netpulse-smoke.sqlite3`, `measurements-export.json`, `smoke_metadata.json`, CSV export, JSON export, and HTML report.
-- Current smoke SQLite evidence: 2 sessions, 47 measurements, 2 speed-test rows, 3 network-interface events, 0 manual markers, 0 incidents, 0 reference speed results.
-- Current smoke speed evidence: download `4472.688 Mbps`, `6,709,211,121` bytes, `12.000 s`, 4 streams, status `Valid`, endpoint `https://cachefly.cachefly.net/100mb.test`; upload `2871.775 Mbps`, `4,324,327,424` bytes, `12.046 s`, 4 streams, status `Valid`, endpoint `https://speed.cloudflare.com/__up`.
+- Previous GitHub Actions run `30164232273` passed build/UI smoke, but its speed values (`4472.688 Mbps` download and `2871.775 Mbps` upload) are now classified as evidence of the old per-stream timing defect, not accuracy validation.
+- Current throughput implementation requires a fresh CI smoke run after the global-window correction.
+- Current deterministic local throughput validation uses a controlled loopback HTTP server and verifies that persisted evidence recomputes from global elapsed wall-clock duration and summed stream bytes.
 - Current local Linux-compatible validation: `python3 -m ruff check .` passed; `python3 -m mypy src/dqopr_netpulse` passed; `python3 -m pytest -q` passed, 24 tests with 2 skipped; `git diff --check` passed.
-- Current local .NET validation: `dotnet build DQOPR.NetPulse.sln --configuration Release --no-restore` passed; `dotnet test DQOPR.NetPulse.sln --configuration Release --no-build` passed, 34 tests; `dotnet format DQOPR.NetPulse.sln --verify-no-changes --verbosity minimal` passed.
+- Current local .NET validation must be run with the SDK pinned in `global.json`; use `scripts/validate.sh`.
 - Real attended Windows desktop alpha.4 comparison verification: not yet completed.
 - Installer verification: not yet started.

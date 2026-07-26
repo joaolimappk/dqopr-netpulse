@@ -76,11 +76,15 @@ Alpha.4 built-in throughput behavior:
 - 1 second warmup per direction, excluded from Mbps.
 - 4 parallel measurement streams.
 - 8 second minimum transfer duration for valid/degraded status.
-- Monotonic stopwatch timing.
-- Actual bytes read or accepted payload bytes counted.
+- One synchronized global monotonic measurement window per direction.
+- Mbps formula: `sum(bytes transferred by all workers during the global window) * 8 / global wall-clock seconds / 1,000,000`.
+- Download bytes are counted only after `ReadAsync` returns a positive count before the global deadline.
+- Upload bytes are counted by a custom `HttpContent` only after the HTTP serialization path completes a write during the global window.
 - Setup duration, transfer duration, warmup duration, stream count, HTTP version, status, endpoint, and safe failure fields persisted.
+- Diagnostic JSON stores global start/end timestamps, global elapsed duration, per-stream bytes, worker start/stop offsets, request counts, HTTP status/header evidence, and failure categories.
+- Suspicious results above the configured throughput ceiling are not clamped; they are marked `Invalid result - measurement accounting inconsistency`.
 
-Rows can have these statuses: `Valid`, `Degraded`, `Endpoint limited`, `Insufficient duration`, `Upload endpoint unavailable`, `Test canceled`, `Invalid result`, or `Legacy estimate - methodology version prior to alpha.4`.
+Rows can have these statuses: `Valid`, `Degraded`, `Endpoint limited`, `Insufficient duration`, `Upload endpoint unavailable`, `Test canceled`, `Invalid result`, `Invalid result - measurement accounting inconsistency`, or `Legacy estimate - methodology version prior to alpha.4`.
 
 Only `Valid` and `Degraded` alpha.4 speed rows are shown as numeric dashboard/history speeds. Legacy, invalid, insufficient-duration, canceled, endpoint-limited, and unavailable rows remain visible in details/exports but are not aggregated as valid speeds.
 
@@ -118,11 +122,11 @@ SQLite stores timestamps as UTC ISO-8601 strings. The WPF UI displays local time
 
 ## Diagnostics
 
-The diagnostic bundle includes raw ICMP samples, target metadata, timestamps, calculated ICMP statistics, throughput stream-level bytes/durations/start/end timestamps, endpoint/provider/status, and safe exception category/message. It does not include request headers, response headers, credentials, or payload bytes.
+The diagnostic bundle includes raw ICMP samples, target metadata, timestamps, calculated ICMP statistics, throughput stream-level bytes/durations/start/end timestamps, endpoint/provider/status, safe response header evidence, and safe exception category/message. It does not include request headers, credentials, cookies, or payload bytes.
 
 ## Remaining Limitations
 
 - The built-in throughput estimate is not ISP-certified and should be compared against independent reference tests.
 - Upload measurement still depends on endpoint behavior and HTTP request completion semantics; endpoint unavailability is reported rather than converted into a numeric speed.
-- GitHub-hosted smoke tests validate function and evidence capture, not the user's real ISP path.
+- GitHub-hosted smoke tests validate execution, persistence, UI smoke behavior, and deterministic calculation evidence. They are not speed accuracy validation and must not be used as a trusted reference network.
 - Real attended Windows comparison must still be repeated across at least five idle cycles before claiming accuracy against the acceptance targets.
