@@ -1017,10 +1017,13 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
         PacketLossChartPoints.Clear();
         SpeedChartPoints.Clear();
 
-        var latency = Downsample(sessionMeasurements.Where(item => item is { Method: ProbeMethod.Icmp, Succeeded: true, LatencyMilliseconds: not null }), 160).ToArray();
+        var latency = Downsample(sessionMeasurements.Where(item => item.Method == ProbeMethod.Icmp), 160).ToArray();
         for (var index = 0; index < latency.Length; index++)
         {
-            LatencyChartPoints.Add(new System.Windows.Point(index * 6, 120 - Math.Min(115, latency[index].LatencyMilliseconds!.Value)));
+            var y = latency[index].Succeeded && latency[index].LatencyMilliseconds is not null
+                ? 120 - Math.Min(115, latency[index].LatencyMilliseconds!.Value)
+                : 118;
+            LatencyChartPoints.Add(new System.Windows.Point(index * 6, y));
         }
 
         var jitterValues = Downsample(JitterCalculator.MeanAbsoluteDifferenceBySeries(sessionMeasurements).Where(item => !item.Key.TargetName.Equals("Local Gateway", StringComparison.OrdinalIgnoreCase)).Select(item => item.Value).Where(value => !double.IsNaN(value)), 160).ToArray();
@@ -1029,13 +1032,22 @@ public sealed class DashboardViewModel : INotifyPropertyChanged
             JitterChartPoints.Add(new System.Windows.Point(index * 6, 120 - Math.Min(115, jitterValues[index])));
         }
 
+        if (JitterChartPoints.Count == 0)
+        {
+            var jitterFailureMarkers = Downsample(sessionMeasurements.Where(item => item.Method == ProbeMethod.Icmp && !IsGateway(item)), 160).ToArray();
+            for (var index = 0; index < jitterFailureMarkers.Length; index++)
+            {
+                JitterChartPoints.Add(new System.Windows.Point(index * 6, 118));
+            }
+        }
+
         var lossValues = Downsample(PacketLossSummary.ByIcmpTarget(sessionMeasurements), 160).ToArray();
         for (var index = 0; index < lossValues.Length; index++)
         {
             PacketLossChartPoints.Add(new System.Windows.Point(index * 40, 120 - Math.Min(115, lossValues[index].LossPercent)));
         }
 
-        var speeds = Downsample(sessionSpeeds.Where(speed => speed.MethodologyVersion == MeasurementMethodology.CurrentVersion && (IsDisplayableSpeed(speed) || speed.ResultStatus == SpeedResultStatus.LegacyEstimate)), 160).ToArray();
+        var speeds = Downsample(sessionSpeeds.Where(speed => speed.MethodologyVersion == MeasurementMethodology.CurrentVersion || speed.ResultStatus == SpeedResultStatus.LegacyEstimate), 160).ToArray();
         for (var index = 0; index < speeds.Length; index++)
         {
             if (speeds[index].MegabitsPerSecond is not null)
